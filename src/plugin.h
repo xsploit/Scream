@@ -31,6 +31,9 @@ typedef enum ParamID
     PARAM_SYNC_RATE_LFO_2,
     PARAM_SEC_RATE_LFO_1,
     PARAM_SEC_RATE_LFO_2,
+    PARAM_TONE_LOW,
+    PARAM_TONE_MID,
+    PARAM_TONE_HIGH,
     // PARAM_RETRIG_LFO_1, // Deprecated. See state.c for details
     // PARAM_RETRIG_LFO_2,
     PARAM_COUNT,
@@ -53,6 +56,9 @@ static const char* PARAM_STR[] = {
     "PARAM_SYNC_RATE_LFO_2",
     "PARAM_SEC_RATE_LFO_1",
     "PARAM_SEC_RATE_LFO_2",
+    "PARAM_TONE_LOW",
+    "PARAM_TONE_MID",
+    "PARAM_TONE_HIGH",
     // "PARAM_RETRIG_LFO_1",
     // "PARAM_RETRIG_LFO_2",
 };
@@ -64,6 +70,9 @@ _Static_assert(ARRLEN(PARAM_STR) == PARAM_COUNT, "");
 
 #define RANGE_OUTPUT_GAIN_MIN -24.0
 #define RANGE_OUTPUT_GAIN_MAX 0
+
+#define RANGE_TONE_GAIN_MIN -18.0
+#define RANGE_TONE_GAIN_MAX 18.0
 
 enum
 {
@@ -180,6 +189,7 @@ typedef struct Plugin
     void*   gui;
     int     width, height; // retained gui size
     bool    lfo_section_open;
+    bool    tone_section_open;
     uint8_t selected_lfo_idx;
     bool    autogain_on;         // default on
     bool    yoink_on;            // default on
@@ -241,6 +251,11 @@ typedef struct Plugin
 
         float lp[2];
         float hp[2];
+        float tone_low[2];
+        float tone_mid[2];
+        float tone_high[2];
+
+        SmoothedValue tone_values[3];
 
     } state[2];
 

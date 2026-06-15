@@ -128,8 +128,28 @@ typedef struct PluginStatev1_1_2
 
     size_t        blob_length;
     unsigned char blob[];
+} PluginStatev1_1_2;
+
+typedef struct PluginStatev1_1_3
+{
+    double params[18];
+
+    xvec2f lfo_mod_amounts[6];
+
+    bool    autogain_on;         // default on
+    bool    yoink_on;            // default on
+    bool    yoink_sub_direct_on; // default on
+    bool    yoink_sub_follow_on; // default on
+    bool    midi_keytracking_on; // default off
+    uint8_t lfo_loop_type[2];    // LFOLoopType
+    uint8_t selected_lfo_idx;
+
+    LFOv0_2_4 lfos[2];
+
+    size_t        blob_length;
+    unsigned char blob[];
 } PluginState;
-_Static_assert(PARAM_COUNT == 15, "Num params changed, update state");
+_Static_assert(PARAM_COUNT == 18, "Num params changed, update state");
 _Static_assert(NUM_AUTOMATABLE_PARAMS == 6, "Num autotable params changed, update state");
 _Static_assert(NUM_LFO_PATTERNS == 8, "Max LFO patterns changed, update state");
 
@@ -294,6 +314,7 @@ void cplug_loadState(void* _p, const void* stateCtx, cplug_readProc readProc)
         static const plugin_version v1_1_0 = {.major = 1, .minor = 1};
         static const plugin_version v1_1_1 = {.major = 1, .minor = 1, .patch = 1};
         static const plugin_version v1_1_2 = {.major = 1, .minor = 1, .patch = 2};
+        static const plugin_version v1_1_3 = {.major = 1, .minor = 1, .patch = 3};
         if (header.version.u32 < v0_0_3.u32)
         {
             PluginStatev0_0_1 state;
@@ -357,7 +378,7 @@ void cplug_loadState(void* _p, const void* stateCtx, cplug_readProc readProc)
                 size_t         saved_blob_length = 0;
                 xvec3f*        dst_points        = NULL;
 
-                if (header.version.u32 >= v1_1_2.u32 && header.size >= sizeof(PluginState))
+                if (header.version.u32 >= v1_1_3.u32 && header.size >= sizeof(PluginState))
                 {
                     PluginState* current = state;
                     state_update_params(p, current->params, ARRLEN(current->params));
@@ -378,6 +399,28 @@ void cplug_loadState(void* _p, const void* stateCtx, cplug_readProc readProc)
                     saved_lfos        = current->lfos;
                     saved_blob        = current->blob;
                     saved_blob_length = current->blob_length;
+                }
+                else if (header.version.u32 >= v1_1_2.u32 && header.size >= sizeof(PluginStatev1_1_2))
+                {
+                    PluginStatev1_1_2* previous = state;
+                    state_update_params(p, previous->params, ARRLEN(previous->params));
+
+                    _Static_assert(sizeof(previous->lfo_mod_amounts) == sizeof(p->lfo_mod_amounts), "");
+                    _Static_assert(ARRLEN(previous->lfo_mod_amounts) == ARRLEN(p->lfo_mod_amounts), "");
+                    memcpy(p->lfo_mod_amounts, previous->lfo_mod_amounts, sizeof(p->lfo_mod_amounts));
+
+                    p->autogain_on         = previous->autogain_on;
+                    p->yoink_on            = previous->yoink_on;
+                    p->yoink_sub_direct_on = previous->yoink_sub_direct_on;
+                    p->yoink_sub_follow_on = previous->yoink_sub_follow_on;
+                    p->midi_keytracking_on = previous->midi_keytracking_on;
+                    p->lfo_loop_type[0]    = previous->lfo_loop_type[0];
+                    p->lfo_loop_type[1]    = previous->lfo_loop_type[1];
+                    p->selected_lfo_idx    = previous->selected_lfo_idx;
+
+                    saved_lfos        = previous->lfos;
+                    saved_blob        = previous->blob;
+                    saved_blob_length = previous->blob_length;
                 }
                 else if (header.version.u32 >= v1_1_1.u32 && header.size >= sizeof(PluginStatev1_1_1))
                 {

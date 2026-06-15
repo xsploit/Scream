@@ -301,6 +301,12 @@ bool param_string_to_value(uint32_t param_id, const char* str, double* val)
         if ((ok = sscanf(str, "%lfdB", val)))
             *val = xm_normd(*val, RANGE_OUTPUT_GAIN_MIN, RANGE_OUTPUT_GAIN_MAX);
         break;
+    case PARAM_TONE_LOW:
+    case PARAM_TONE_MID:
+    case PARAM_TONE_HIGH:
+        if ((ok = sscanf(str, "%lfdB", val)))
+            *val = xm_normd(*val, RANGE_TONE_GAIN_MIN, RANGE_TONE_GAIN_MAX);
+        break;
     case PARAM_PATTERN_LFO_1:
     case PARAM_PATTERN_LFO_2:
         if ((ok = sscanf(str, "%lf", val)))
@@ -375,6 +381,14 @@ int param_value_to_string(ParamID paramId, char* buf, size_t bufsize, double val
     case PARAM_OUTPUT_GAIN:
     {
         double dB = xm_lerpd(value, RANGE_OUTPUT_GAIN_MIN, RANGE_OUTPUT_GAIN_MAX);
+        n         = xtr_fmt(buf, bufsize, 0, "%.2fdB", dB);
+        break;
+    }
+    case PARAM_TONE_LOW:
+    case PARAM_TONE_MID:
+    case PARAM_TONE_HIGH:
+    {
+        double dB = xm_lerpd(value, RANGE_TONE_GAIN_MIN, RANGE_TONE_GAIN_MAX);
         n         = xtr_fmt(buf, bufsize, 0, "%.2fdB", dB);
         break;
     }
@@ -464,6 +478,9 @@ void cplug_getParameterName(void* p, uint32_t paramId, char* buf, size_t buflen)
         "LFO 2 Sync Rate",
         "LFO 1 ms Rate",
         "LFO 2 ms Rate",
+        "Tone Low",
+        "Tone Mid",
+        "Tone High",
     };
     // clang-format on
     _Static_assert(ARRLEN(NAMES) == PARAM_COUNT);
@@ -527,6 +544,11 @@ double cplug_getDefaultParameterValue(void* _p, uint32_t paramId)
     case PARAM_SEC_RATE_LFO_1:
     case PARAM_SEC_RATE_LFO_2:
         v = normalise_sec(0.25); // 250ms
+        break;
+    case PARAM_TONE_LOW:
+    case PARAM_TONE_MID:
+    case PARAM_TONE_HIGH:
+        v = xm_normd(0, RANGE_TONE_GAIN_MIN, RANGE_TONE_GAIN_MAX);
         break;
     case PARAM_COUNT:
         break;

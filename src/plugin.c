@@ -110,6 +110,7 @@ void* cplug_createPlugin(CplugHostContext* ctx)
     p->height = GUI_INIT_HEIGHT * 2;
 
     p->lfo_section_open           = true;
+    p->tone_section_open          = false;
     p->autogain_on                = true;
     p->yoink_on                   = true;
     p->yoink_sub_direct_on        = true;
@@ -234,6 +235,9 @@ void cplug_setSampleRateAndBlockSize(void* _p, double sampleRate, uint32_t maxBl
 
         for (int i = 0; i < ARRLEN(s->values); i++)
             smoothvalue_reset(&s->values[i], p->audio_params[i]);
+
+        for (int i = 0; i < ARRLEN(s->tone_values); i++)
+            smoothvalue_reset(&s->tone_values[i], p->audio_params[PARAM_TONE_LOW + i]);
     }
 
     smoothvalue_reset(&p->output_gain, p->main_params[PARAM_OUTPUT_GAIN]);
@@ -390,6 +394,24 @@ static inline float au5_map_sub_follow_gain(float yoink)
 {
     const float movement = powf(xm_clampf(yoink, 0.0f, 1.0f), 0.75f);
     return xm_lerpf(movement, 1.0f, 0.55f);
+}
+
+enum
+{
+    TONE_LOW_IDX,
+    TONE_MID_IDX,
+    TONE_HIGH_IDX,
+    TONE_COUNT,
+};
+
+static inline float tone_norm_to_dB(float value)
+{
+    return xm_lerpf(xm_clampf(value, 0.0f, 1.0f), RANGE_TONE_GAIN_MIN, RANGE_TONE_GAIN_MAX);
+}
+
+static inline bool tone_param_is_active(float value)
+{
+    return fabsf(value - 0.5f) > 1.0e-5f;
 }
 
 typedef struct YoinkOutput
@@ -612,12 +634,21 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
         for (int i = 0; i < ARRLEN(s.values); i++)
             smoothvalue_set_target(&s.values[i], p->audio_params[i], param_smoothing_time);
 
+        _Static_assert(ARRLEN(s.tone_values) == TONE_COUNT, "");
+        _Static_assert(PARAM_TONE_MID == PARAM_TONE_LOW + 1, "");
+        _Static_assert(PARAM_TONE_HIGH == PARAM_TONE_LOW + 2, "");
+        for (int i = 0; i < ARRLEN(s.tone_values); i++)
+            smoothvalue_set_target(&s.tone_values[i], p->audio_params[PARAM_TONE_LOW + i], param_smoothing_time);
+
         float lp_cutoff = s.values[PARAM_CUTOFF].current;
         float hp_cutoff = s.values[PARAM_SCREAM].current;
         float resonance = s.values[PARAM_RESONANCE].current;
         float in_gain   = s.values[PARAM_INPUT_GAIN].current;
         float wet       = s.values[PARAM_WET].current;
         float yoink     = s.values[PARAM_YOINK].current;
+        float tone_low  = s.tone_values[TONE_LOW_IDX].current;
+        float tone_mid  = s.tone_values[TONE_MID_IDX].current;
+        float tone_high = s.tone_values[TONE_HIGH_IDX].current;
 
 // #define CUTOFF_MAX    MIDI_NOTE_NUM_20kHz
 #define CUTOFF_MAX (MIDI_NOTE_NUM_20kHz)
@@ -654,9 +685,18 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
         Coeffs lp_c = filter_LP(lp_cutoff, lp_Q, fs_inv);
         Coeffs hp_c = filter_HP(hp_cutoff, hp_Q, fs_inv);
 
+        BiquadCoeffs tone_low_c  = biquad_make_low_shelf(160.0f, tone_norm_to_dB(tone_low), (float)p->sample_rate);
+        BiquadCoeffs tone_mid_c  = biquad_make_peak(950.0f, 0.75f, tone_norm_to_dB(tone_mid), (float)p->sample_rate);
+        BiquadCoeffs tone_high_c = biquad_make_high_shelf(5600.0f, tone_norm_to_dB(tone_high), (float)p->sample_rate);
+
         const bool smooth_params = s.values[PARAM_CUTOFF].remaining > 0 | s.values[PARAM_SCREAM].remaining > 0 |
                                    s.values[PARAM_RESONANCE].remaining > 0 | s.values[PARAM_INPUT_GAIN].remaining > 0 |
                                    s.values[PARAM_WET].remaining > 0 | s.values[PARAM_YOINK].remaining > 0;
+        const bool smooth_tone = s.tone_values[TONE_LOW_IDX].remaining > 0 ||
+                                 s.tone_values[TONE_MID_IDX].remaining > 0 ||
+                                 s.tone_values[TONE_HIGH_IDX].remaining > 0;
+        const bool tone_active = smooth_tone || tone_param_is_active(tone_low) || tone_param_is_active(tone_mid) ||
+                                 tone_param_is_active(tone_high);
 
         const bool has_modulation_or_smoothing = !!lfo_1_mod_flags || !!lfo_2_mod_flags || smooth_params;
 
@@ -745,6 +785,17 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
                 hp_c = filter_HP(hp_cutoff, hp_Q, fs_inv);
             } // !!has_modulation_or_smoothing
 
+            if (smooth_tone)
+            {
+                tone_low  = smoothvalue_tick(&s.tone_values[TONE_LOW_IDX]);
+                tone_mid  = smoothvalue_tick(&s.tone_values[TONE_MID_IDX]);
+                tone_high = smoothvalue_tick(&s.tone_values[TONE_HIGH_IDX]);
+
+                tone_low_c  = biquad_make_low_shelf(160.0f, tone_norm_to_dB(tone_low), (float)p->sample_rate);
+                tone_mid_c  = biquad_make_peak(950.0f, 0.75f, tone_norm_to_dB(tone_mid), (float)p->sample_rate);
+                tone_high_c = biquad_make_high_shelf(5600.0f, tone_norm_to_dB(tone_high), (float)p->sample_rate);
+            }
+
             const float dry = audio[i];
             float       x   = dry;
             float       direct_sub = 0.0f;
@@ -785,7 +836,27 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
                 y = 0;
 
             // *it = xm_clampf(y, -1, 1);
-            audio[i] = direct_sub + wet * y + (1 - wet) * pre_scream;
+            float mixed = direct_sub + wet * y + (1 - wet) * pre_scream;
+            if (tone_active)
+            {
+                if (tone_param_is_active(tone_low) || s.tone_values[TONE_LOW_IDX].remaining > 0)
+                    mixed = biquad_process(mixed, &tone_low_c, s.tone_low);
+                else
+                    s.tone_low[0] = s.tone_low[1] = 0.0f;
+
+                if (tone_param_is_active(tone_mid) || s.tone_values[TONE_MID_IDX].remaining > 0)
+                    mixed = biquad_process(mixed, &tone_mid_c, s.tone_mid);
+                else
+                    s.tone_mid[0] = s.tone_mid[1] = 0.0f;
+
+                if (tone_param_is_active(tone_high) || s.tone_values[TONE_HIGH_IDX].remaining > 0)
+                    mixed = biquad_process(mixed, &tone_high_c, s.tone_high);
+                else
+                    s.tone_high[0] = s.tone_high[1] = 0.0f;
+            }
+            if (mixed != mixed)
+                mixed = 0.0f;
+            audio[i] = mixed;
             // *it = x;
 
             // Feedback
@@ -823,6 +894,12 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
         ROUND_STATE_TO_ZERO(s.lp[1])
         ROUND_STATE_TO_ZERO(s.hp[0])
         ROUND_STATE_TO_ZERO(s.hp[1])
+        ROUND_STATE_TO_ZERO(s.tone_low[0])
+        ROUND_STATE_TO_ZERO(s.tone_low[1])
+        ROUND_STATE_TO_ZERO(s.tone_mid[0])
+        ROUND_STATE_TO_ZERO(s.tone_mid[1])
+        ROUND_STATE_TO_ZERO(s.tone_high[0])
+        ROUND_STATE_TO_ZERO(s.tone_high[1])
         ROUND_STATE_TO_ZERO(s.fb_yn_1)
 
         p->state[ch] = s;

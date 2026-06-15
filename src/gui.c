@@ -534,7 +534,7 @@ void pw_get_info(struct PWGetInfo* info)
         uint32_t min_height     = (uint32_t)(GUI_MIN_HEIGHT);
         uint32_t content_height = (uint32_t)(CONTENT_HEIGHT);
 
-        if (gui->plugin->lfo_section_open)
+        if (gui->plugin->lfo_section_open || gui->plugin->tone_section_open)
         {
             min_height += content_height;
         }
@@ -743,21 +743,38 @@ bool pw_event(const PWEvent* event)
 
     if (event->type == PW_EVENT_MOUSE_LEFT_DOWN)
     {
-        if (imgui_hittest_rect((imgui_pt){event->mouse.x, event->mouse.y}, &gui->lfo_toggle_button))
+        imgui_pt mouse = {event->mouse.x, event->mouse.y};
+        bool     hit_lfo  = imgui_hittest_rect(mouse, &gui->lfo_toggle_button);
+        bool     hit_tone = imgui_hittest_rect(mouse, &gui->tone_toggle_button);
+        if (hit_lfo || hit_tone)
         {
             LayoutMetrics* lm = &gui->layout;
 
-            gui->plugin->lfo_section_open = !gui->plugin->lfo_section_open;
+            const bool was_open = gui->plugin->lfo_section_open || gui->plugin->tone_section_open;
+            if (hit_lfo)
+            {
+                bool next = !gui->plugin->lfo_section_open;
+                gui->plugin->lfo_section_open  = next;
+                gui->plugin->tone_section_open = false;
+            }
+            else
+            {
+                bool next = !gui->plugin->tone_section_open;
+                gui->plugin->tone_section_open = next;
+                gui->plugin->lfo_section_open  = false;
+            }
+            const bool is_open = gui->plugin->lfo_section_open || gui->plugin->tone_section_open;
 
             int next_height    = lm->height;
             int content_height = lm->content_b - lm->content_y;
-            if (gui->plugin->lfo_section_open)
+            if (!was_open && is_open)
                 next_height += content_height;
-            else
+            else if (was_open && !is_open)
                 next_height -= content_height - lm->top_content_height;
             xassert(next_height >= 0);
 
-            gui->plugin->cplug_ctx->requestResize(gui->plugin->cplug_ctx, lm->width, next_height);
+            if (next_height != lm->height)
+                gui->plugin->cplug_ctx->requestResize(gui->plugin->cplug_ctx, lm->width, next_height);
         }
     }
 
@@ -1083,6 +1100,132 @@ bool do_bg_command_lists_match(GUI* gui)
     return match;
 }
 
+static void draw_drawer_toggle(GUI* gui, imgui_rect rect, const char* label, bool open, unsigned widget_id)
+{
+    XVGCommandList* bg = gui->xvg_bg;
+    LayoutMetrics*  lm = &gui->layout;
+    imgui_context*   im = &gui->imgui;
+
+    float h = rect.b - rect.y;
+    float w = rect.r - rect.x;
+    {
+        const float radius = lm->param_scale * 12;
+        XVGGradient g      = {.colour1 = C_BG_LIGHT};
+        xvg_draw_rectangle_with_gradient_ex(bg, rect.x, rect.y, w, h, radius, 0, radius, 0, 0, g);
+        float blur = 6;
+        g          = xvg_make_shadow(0x40, 0x0, 0, 0, blur, -blur, true);
+        xvg_draw_rectangle_with_gradient_ex(bg, rect.x, rect.y, w, h, radius, 0, radius, 0, 0, g);
+    }
+
+    float cy            = (rect.y + rect.b) * 0.5f;
+    float inner_padding = 12 * lm->param_scale;
+    float fsize         = lm->param_scale * 12;
+    xvg_draw_text(bg, rect.x + inner_padding, cy, label, NULL, fsize, XVG_ALIGN_CL, C_TEXT_LIGHT_BG);
+
+    float tri_half_width = 5 * lm->param_scale;
+    float y1             = cy + tri_half_width * (1.0f / 3.0f);
+    float y2             = cy - tri_half_width * (2.0f / 3.0f);
+    if (!open)
+    {
+        float tmp = y1;
+        y1        = y2;
+        y2        = tmp;
+    }
+    y1           += 1;
+    y2           += 1;
+    float x1      = rect.r - inner_padding;
+    float x2      = rect.r - inner_padding - tri_half_width;
+    float x3      = rect.r - inner_padding - tri_half_width * 2;
+    float stroke  = 2 * lm->param_scale;
+    xvg_draw_line_round(bg, x1, y1, x2, y2, stroke, C_TEXT_LIGHT_BG);
+    xvg_draw_line_round(bg, x2, y2, x3, y1, stroke, C_TEXT_LIGHT_BG);
+
+    unsigned events = imgui_get_events_rect(im, widget_id, &rect);
+    if (events & IMGUI_EVENT_MOUSE_ENTER)
+        pw_set_mouse_cursor(gui->pw, PW_CURSOR_HAND_POINT);
+}
+
+void draw_tone_section(GUI* gui)
+{
+    Plugin*         p   = gui->plugin;
+    XVGCommandList* bg  = gui->xvg_bg;
+    XVGCommandList* xvg = gui->xvg_anim;
+    LayoutMetrics*  lm  = &gui->layout;
+    imgui_context*   im  = &gui->imgui;
+
+    const float scale = lm->param_scale;
+    imgui_rect  area;
+    area.x = lm->content_x + 64 * scale;
+    area.r = lm->content_r - 64 * scale;
+    area.y = lm->top_content_bottom + 26 * scale;
+    area.b = lm->content_b - 24 * scale;
+
+    const float title_size = 14 * scale;
+    xvg_draw_text(bg, area.x, area.y, "TONE", NULL, title_size, XVG_ALIGN_CL, C_TEXT_LIGHT_BG);
+
+    const ParamID ids[]   = {PARAM_TONE_LOW, PARAM_TONE_MID, PARAM_TONE_HIGH};
+    const char*   names[] = {"LOW", "MID", "HIGH"};
+    _Static_assert(ARRLEN(ids) == 3, "");
+    _Static_assert(ARRLEN(names) == ARRLEN(ids), "");
+
+    const float slider_top = area.y + 36 * scale;
+    const float slider_h   = xm_maxf(96 * scale, area.b - slider_top - 44 * scale);
+    const float slider_bot = slider_top + slider_h;
+    const float slot_w     = xm_minf(138 * scale, (area.r - area.x) / 3.0f);
+    const float total_w    = slot_w * 3.0f;
+    const float start_x    = (area.x + area.r - total_w) * 0.5f;
+    const float rail_w     = 18 * scale;
+    const float handle_w   = 54 * scale;
+    const float handle_h   = 14 * scale;
+    const float center_y   = xm_lerpf(0.5f, slider_bot, slider_top);
+
+    extern int param_value_to_string(ParamID paramId, char* buf, size_t bufsize, double value);
+
+    for (int i = 0; i < ARRLEN(ids); i++)
+    {
+        const float cx = start_x + slot_w * ((float)i + 0.5f);
+
+        imgui_rect hit;
+        hit.x = cx - handle_w * 0.7f;
+        hit.r = cx + handle_w * 0.7f;
+        hit.y = slider_top - 8 * scale;
+        hit.b = slider_bot + 8 * scale;
+
+        unsigned events = imgui_get_events_rect(im, 'ton0' + i, &hit);
+        double   value  = handle_param_events(gui, ids[i], events, slider_h);
+        float    value_y = xm_lerpf((float)value, slider_bot, slider_top);
+
+        xvg_draw_text(bg, cx, area.y + 8 * scale, names[i], NULL, 12 * scale, XVG_ALIGN_CC, C_TEXT_LIGHT_BG);
+
+        float rail_x = cx - rail_w * 0.5f;
+        xvg_draw_rectangle(bg, rail_x, slider_top, rail_w, slider_h, 6 * scale, 0, C_BG_DARK);
+        xvg_draw_solid_rectangle(bg, rail_x - 8 * scale, center_y - 1, rail_w + 16 * scale, 2, C_GRID_SECONDARY);
+
+        for (int tick = 0; tick <= 6; tick++)
+        {
+            float t      = (float)tick / 6.0f;
+            float tick_y = floorf(xm_lerpf(t, slider_bot, slider_top)) + 0.5f;
+            float tick_w = tick == 3 ? 18 * scale : 10 * scale;
+            xvg_draw_solid_rectangle(bg, cx - tick_w * 0.5f, tick_y, tick_w, 1, C_GREY_2);
+        }
+
+        float fill_y = xm_minf(value_y, center_y);
+        float fill_h = fabsf(value_y - center_y);
+        if (fill_h > 0.5f)
+        {
+            unsigned fill_col = value >= 0.5 ? C_LIGHT_BLUE_2 : C_DARK_BLUE;
+            xvg_draw_rectangle(xvg, rail_x + 3 * scale, fill_y, rail_w - 6 * scale, fill_h, 4 * scale, 0, fill_col);
+        }
+
+        xvg_draw_rectangle(xvg, cx - handle_w * 0.5f, value_y - handle_h * 0.5f, handle_w, handle_h, 4 * scale, 0, C_BG_LIGHT);
+        xvg_draw_rectangle(xvg, cx - handle_w * 0.5f, value_y - handle_h * 0.5f, handle_w, handle_h, 4 * scale, 1 * scale, C_GREY_2);
+
+        char label[24];
+        int  label_len = param_value_to_string(ids[i], label, sizeof(label), value);
+        xvg_draw_text(xvg, cx, slider_bot + 24 * scale, label, label + label_len, 11 * scale, XVG_ALIGN_CC, C_TEXT_LIGHT_BG);
+    }
+}
+
 void pw_tick(void* _gui)
 {
     GUI*    gui = _gui;
@@ -1159,9 +1302,10 @@ void pw_tick(void* _gui)
         lm->width  = p->width;
         lm->height = p->height;
 
-        int init_height = GUI_INIT_HEIGHT;
-        int top_height  = lm->height;
-        if (p->lfo_section_open)
+        int        init_height = GUI_INIT_HEIGHT;
+        int        top_height  = lm->height;
+        const bool drawer_open = p->lfo_section_open || p->tone_section_open;
+        if (drawer_open)
         {
             init_height = HEIGHT_HEADER + HEIGHT_FOOTER + 2 * CONTENT_HEIGHT + 2 * BORDER_PADDING;
         }
@@ -1181,10 +1325,8 @@ void pw_tick(void* _gui)
         lm->content_y = lm->height_header + BORDER_PADDING;
         lm->content_b = lm->height - lm->height_footer - BORDER_PADDING;
 
-        const bool lfo_open = p->lfo_section_open;
-
         float content_height = lm->content_b - lm->content_y;
-        if (lfo_open)
+        if (drawer_open)
             lm->top_content_height = floorf(content_height * 0.5f);
         else
             lm->top_content_height = content_height;
@@ -1278,12 +1420,19 @@ void pw_tick(void* _gui)
         lm->current_lfo_playhead = lm->last_lfo_playhead = playhead;
 
         float      lfo_btn_width = 64 * lm->param_scale;
+        float      lfo_btn_gap   = 8 * lm->param_scale;
+        float      lfo_btn_total = lfo_btn_width * 2 + lfo_btn_gap;
         imgui_rect lfo_btn;
-        lfo_btn.x              = (lm->width / 2) - lfo_btn_width * 0.5f;
+        lfo_btn.x              = (lm->width / 2) - lfo_btn_total * 0.5f;
         lfo_btn.y              = lm->top_content_bottom - 20 * lm->param_scale;
-        lfo_btn.r              = (lm->width / 2) + lfo_btn_width * 0.5f;
+        lfo_btn.r              = lfo_btn.x + lfo_btn_width;
         lfo_btn.b              = lm->top_content_bottom;
         gui->lfo_toggle_button = lfo_btn;
+
+        imgui_rect tone_btn      = lfo_btn;
+        tone_btn.x               = lfo_btn.r + lfo_btn_gap;
+        tone_btn.r               = tone_btn.x + lfo_btn_width;
+        gui->tone_toggle_button  = tone_btn;
 
         // Framebuffer
         int fb_width  = lm->width * gui->xvg.backingScaleFactor;
@@ -2241,63 +2390,19 @@ void pw_tick(void* _gui)
     //     }
     // #endif
 
-    // LFO toggle button
+    // Drawer toggle buttons
     {
-        imgui_rect rect = gui->lfo_toggle_button;
-        // snvg_command_draw_nvg(nvg, XVG_LABEL("ayy lmao"));
-
-        bool lfo_open = p->lfo_section_open;
-
-        if (lfo_open) // section seperator
+        if (p->lfo_section_open || p->tone_section_open)
         {
+            imgui_rect rect = gui->lfo_toggle_button;
             float       y = rect.b - 4;
             float       b = rect.b;
             XVGGradient g = xvg_make_linear_gradient(0x0, 0x40, 0, y, 0, b);
             xvg_draw_solid_rectangle_with_gradient(bg, lm->content_x, y, lm->content_r - lm->content_x, b - y, g);
         }
 
-        // Inlet
-        float h = rect.b - rect.y;
-        float w = rect.r - rect.x;
-        {
-            // Note: nanovg doesn't have a great way to make a rounded rectangle that looks like this:
-            //  _______
-            // /       \\
-            // ----------
-            const float radius = lm->param_scale * 12;
-            XVGGradient g      = {.colour1 = C_BG_LIGHT};
-            xvg_draw_rectangle_with_gradient_ex(bg, rect.x, rect.y, w, h, radius, 0, radius, 0, 0, g);
-            float blur = 6;
-            g          = xvg_make_shadow(0x40, 0x0, 0, 0, blur, -blur, true);
-            xvg_draw_rectangle_with_gradient_ex(bg, rect.x, rect.y, w, h, radius, 0, radius, 0, 0, g);
-        }
-
-        float cy            = (rect.y + rect.b) * 0.5f;
-        float inner_padding = 12 * lm->param_scale;
-        float fsize         = lm->param_scale * 12;
-        xvg_draw_text(bg, rect.x + inner_padding, cy, "LFO", 0, fsize, XVG_ALIGN_CL, C_TEXT_LIGHT_BG);
-
-        // Arrow
-        float tri_half_width = 5 * lm->param_scale;
-        float y1             = cy + tri_half_width * (1.0f / 3.0f);
-        float y2             = cy - tri_half_width * (2.0f / 3.0f);
-        if (!lfo_open)
-        {
-            float tmp = y1;
-            y1        = y2;
-            y2        = tmp;
-        }
-        y1           += 1;
-        y2           += 1;
-        float x1      = rect.r - inner_padding;
-        float x2      = rect.r - inner_padding - tri_half_width;
-        float x3      = rect.r - inner_padding - tri_half_width * 2;
-        float stroke  = 2 * lm->param_scale;
-        xvg_draw_line_round(bg, x1, y1, x2, y2, stroke, C_TEXT_LIGHT_BG);
-        xvg_draw_line_round(bg, x2, y2, x3, y1, stroke, C_TEXT_LIGHT_BG);
-        unsigned events = imgui_get_events_rect(im, 'lopn', &rect);
-        if (events & IMGUI_EVENT_MOUSE_ENTER)
-            pw_set_mouse_cursor(gui->pw, PW_CURSOR_HAND_POINT);
+        draw_drawer_toggle(gui, gui->lfo_toggle_button, "LFO", p->lfo_section_open, 'lopn');
+        draw_drawer_toggle(gui, gui->tone_toggle_button, "TONE", p->tone_section_open, 'topn');
     }
 
     if (p->lfo_section_open)
@@ -2322,6 +2427,10 @@ void pw_tick(void* _gui)
         //     nvgSetPaint(nvg, paint);
         //     nvgFill(nvg);
         // }
+    }
+    else if (p->tone_section_open)
+    {
+        draw_tone_section(gui);
     }
 
     // Footer bottom left
