@@ -113,6 +113,7 @@ void* cplug_createPlugin(CplugHostContext* ctx)
     p->autogain_on                = true;
     p->yoink_on                   = true;
     p->yoink_sub_direct_on        = true;
+    p->yoink_sub_follow_on        = true;
     p->keytracking_last_midi_note = -1;
 
     for (int i = 0; i < ARRLEN(p->lfo_loop_type); i++)
@@ -385,6 +386,12 @@ au5_process_dc_block(float input, float* previous_input, float* previous_output,
     return *previous_output;
 }
 
+static inline float au5_map_sub_follow_gain(float yoink)
+{
+    const float movement = powf(xm_clampf(yoink, 0.0f, 1.0f), 0.75f);
+    return xm_lerpf(movement, 1.0f, 0.55f);
+}
+
 typedef struct YoinkOutput
 {
     float pre_scream;
@@ -392,7 +399,13 @@ typedef struct YoinkOutput
 } YoinkOutput;
 
 static inline YoinkOutput
-au5_process_yoink_core(struct YoinkState* s, float input, float yoink, bool sub_direct, double sample_rate)
+au5_process_yoink_core(
+    struct YoinkState* s,
+    float              input,
+    float              yoink,
+    bool               sub_direct,
+    bool               sub_follow,
+    double             sample_rate)
 {
     const float sub                = au5_process_sub_split(s, input, sample_rate);
     const float square_branch      = input - sub;
@@ -410,7 +423,7 @@ au5_process_yoink_core(struct YoinkState* s, float input, float yoink, bool sub_
         &s->yoink_dc_prev_input,
         &s->yoink_dc_prev_output,
         sample_rate);
-    output.direct_sub = sub_direct ? direct_sub : 0.0f;
+    output.direct_sub = sub_direct ? direct_sub * (sub_follow ? au5_map_sub_follow_gain(yoink) : 1.0f) : 0.0f;
     return output;
 }
 
@@ -739,7 +752,13 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
             if (p->yoink_on)
             {
                 YoinkOutput yoink_output =
-                    au5_process_yoink_core(&p->yoink_state[ch], x, yoink, p->yoink_sub_direct_on, p->sample_rate);
+                    au5_process_yoink_core(
+                        &p->yoink_state[ch],
+                        x,
+                        yoink,
+                        p->yoink_sub_direct_on,
+                        p->yoink_sub_follow_on,
+                        p->sample_rate);
                 x          = yoink_output.pre_scream;
                 direct_sub = yoink_output.direct_sub;
             }

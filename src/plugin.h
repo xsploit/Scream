@@ -184,6 +184,7 @@ typedef struct Plugin
     bool    autogain_on;         // default on
     bool    yoink_on;            // default on
     bool    yoink_sub_direct_on; // default on
+    bool    yoink_sub_follow_on; // default on
     bool    midi_keytracking_on; // default off
     int     keytracking_last_midi_note;
 

@@ -2389,6 +2389,25 @@ void pw_tick(void* _gui)
         xvg_draw_text(bg, rect.x, cy, "SUB DIRECT", NULL, fsize, XVG_ALIGN_CL, C_TEXT_DARK_BG);
         draw_checkbox(bg, checkbox_height, cy, rect.r, lm->param_scale, yoink_sub_direct_on);
 
+        // Sub Follow
+        rect.x = rect.r + BORDER_PADDING * 4;
+        rect.r = rect.x + 112 * lm->param_scale;
+
+        events = imgui_get_events_rect(im, 'yflw', &rect);
+
+        static const char* DESCRIPTION_SUB_FOLLOW =
+            "When Sub Follow is on, the clean Sub Direct path follows the final Yoink movement with a safe gain "
+            "contour, so Yoink LFO/envelope motion also moves the sub without dirtying it.";
+        tooltip_handle_events(&gui->tooltip, rect, DESCRIPTION_SUB_FOLLOW, gui->frame_start_time, events);
+        if (events & IMGUI_EVENT_MOUSE_ENTER)
+            pw_set_mouse_cursor(gui->pw, PW_CURSOR_HAND_POINT);
+        if (events & IMGUI_EVENT_MOUSE_LEFT_DOWN)
+            p->yoink_sub_follow_on ^= 1;
+
+        bool yoink_sub_follow_on = p->yoink_sub_follow_on;
+        xvg_draw_text(bg, rect.x, cy, "SUB FOLLOW", NULL, fsize, XVG_ALIGN_CL, C_TEXT_DARK_BG);
+        draw_checkbox(bg, checkbox_height, cy, rect.r, lm->param_scale, yoink_sub_follow_on);
+
         // Keytracking
         rect.x = rect.r + BORDER_PADDING * 4;
         rect.r = rect.x + 152 * lm->param_scale;

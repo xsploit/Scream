@@ -1,4 +1,5 @@
 .cache
+.lean-ctx
 .clangd
 .DS_Store
 .ideas
