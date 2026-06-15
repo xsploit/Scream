@@ -4,6 +4,8 @@
 .ideas
 .vscode
 build
+build-yoink
+build-yoink-debug
 dist
 src/shaders/*.h
 installer/LICENSE

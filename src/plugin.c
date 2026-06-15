@@ -104,12 +104,15 @@ void* cplug_createPlugin(CplugHostContext* ctx)
     p                  = linked_arena_alloc(arena, sizeof(*p));
     p->audio_arena     = arena;
     p->cplug_ctx       = ctx;
+    memset(p->yoink_state, 0, sizeof(p->yoink_state));
 
     p->width  = GUI_INIT_WIDTH;
     p->height = GUI_INIT_HEIGHT * 2;
 
     p->lfo_section_open           = true;
     p->autogain_on                = true;
+    p->yoink_on                   = true;
+    p->yoink_sub_direct_on        = true;
     p->keytracking_last_midi_note = -1;
 
     for (int i = 0; i < ARRLEN(p->lfo_loop_type); i++)
@@ -280,6 +283,126 @@ const double SYNC_VALUES[] = {
 };
 _Static_assert(ARRLEN(SYNC_VALUES) == LFO_RATE_COUNT, "");
 // clang-format on
+
+#define AU5_YOINK_SKEW 1.91f
+#define AU5_MIN_DELAY_MS 0.01f
+#define AU5_POSITIVE_MAX_DELAY_MS 20.0f
+#define AU5_NEGATIVE_MAX_DELAY_MS 10.0f
+#define AU5_SUB_SPLIT_HZ 120.0f
+#define AU5_COMB_GAIN 0.5011872f
+
+static inline float finite_guard(float v)
+{
+    if (v != v)
+        return 0.0f;
+
+    return xm_clampf(v, -8.0f, 8.0f);
+}
+
+static inline float au5_map_yoink_to_positive_delay(float yoink)
+{
+    float y = powf(xm_clampf(yoink, 0.0f, 1.0f), AU5_YOINK_SKEW);
+    return AU5_MIN_DELAY_MS + (AU5_POSITIVE_MAX_DELAY_MS - AU5_MIN_DELAY_MS) * y;
+}
+
+static inline float au5_map_yoink_to_negative_delay(float yoink)
+{
+    float y = powf(xm_clampf(yoink, 0.0f, 1.0f), AU5_YOINK_SKEW);
+    return AU5_MIN_DELAY_MS + (AU5_NEGATIVE_MAX_DELAY_MS - AU5_MIN_DELAY_MS) * y;
+}
+
+static inline float au5_delay_read(struct YoinkState* s, int stage, float delay_ms, double sample_rate)
+{
+    xassert(stage >= 0 && stage < YOINK_COMB_STAGE_COUNT);
+
+    const int   size              = YOINK_DELAY_BUFFER_SIZE;
+    const float max_delay_samples = (float)(size - 3);
+    float       delay_samples     = delay_ms * (float)sample_rate * 0.001f;
+    delay_samples                 = xm_clampf(delay_samples, 1.0f, max_delay_samples);
+
+    float read_pos = (float)s->yoink_delay_write_index[stage] - delay_samples;
+    while (read_pos < 0.0f)
+        read_pos += (float)size;
+    while (read_pos >= (float)size)
+        read_pos -= (float)size;
+
+    const int   idx0     = (int)floorf(read_pos);
+    const int   idx1     = (idx0 + 1) & (YOINK_DELAY_BUFFER_SIZE - 1);
+    const float fraction = read_pos - (float)idx0;
+    const float y0       = s->yoink_delay_lines[stage][idx0];
+    const float y1       = s->yoink_delay_lines[stage][idx1];
+
+    return y0 + (y1 - y0) * fraction;
+}
+
+static inline void au5_delay_push(struct YoinkState* s, int stage, float sample)
+{
+    xassert(stage >= 0 && stage < YOINK_COMB_STAGE_COUNT);
+
+    const int idx = s->yoink_delay_write_index[stage];
+    s->yoink_delay_lines[stage][idx] = finite_guard(sample);
+    s->yoink_delay_write_index[stage] = (idx + 1) & (YOINK_DELAY_BUFFER_SIZE - 1);
+}
+
+static inline float au5_process_comb_stage(struct YoinkState* s, int stage, float input, float delay_ms, float polarity, double sample_rate)
+{
+    const float delayed = au5_delay_read(s, stage, delay_ms, sample_rate);
+    au5_delay_push(s, stage, input);
+    return finite_guard((input + delayed * polarity) * AU5_COMB_GAIN);
+}
+
+static inline float au5_process_comb_stack(struct YoinkState* s, float input, float yoink, double sample_rate)
+{
+    const float positive_delay_ms = au5_map_yoink_to_positive_delay(yoink);
+    const float negative_delay_ms = au5_map_yoink_to_negative_delay(yoink);
+
+    float value = au5_process_comb_stage(s, 0, input, positive_delay_ms, 1.0f, sample_rate);
+    value       = au5_process_comb_stage(s, 1, value, negative_delay_ms, -1.0f, sample_rate);
+    value       = au5_process_comb_stage(s, 2, value, positive_delay_ms, 1.0f, sample_rate);
+    value       = au5_process_comb_stage(s, 3, value, negative_delay_ms, -1.0f, sample_rate);
+    return finite_guard(value);
+}
+
+static inline float au5_process_sub_split(struct YoinkState* s, float input, double sample_rate)
+{
+    const float safe_sample_rate = (float)(sample_rate > 0 ? sample_rate : 44100.0);
+    const float coefficient      = xm_clampf(1.0f - expf(-XM_TAUf * AU5_SUB_SPLIT_HZ / safe_sample_rate), 0.0f, 1.0f);
+
+    s->yoink_sub_z1 += coefficient * (input - s->yoink_sub_z1);
+    s->yoink_sub_z2 += coefficient * (s->yoink_sub_z1 - s->yoink_sub_z2);
+    return finite_guard(s->yoink_sub_z2);
+}
+
+static inline float au5_process_dc_block(struct YoinkState* s, float input, double sample_rate)
+{
+    const float safe_sample_rate = (float)(sample_rate > 0 ? sample_rate : 44100.0);
+    const float r                = expf(-XM_TAUf * 20.0f / safe_sample_rate);
+    const float output           = input - s->yoink_dc_prev_input + r * s->yoink_dc_prev_output;
+
+    s->yoink_dc_prev_input  = input;
+    s->yoink_dc_prev_output = finite_guard(output);
+    return s->yoink_dc_prev_output;
+}
+
+typedef struct YoinkOutput
+{
+    float pre_scream;
+    float direct_sub;
+} YoinkOutput;
+
+static inline YoinkOutput
+au5_process_yoink_core(struct YoinkState* s, float input, float yoink, bool sub_direct, double sample_rate)
+{
+    const float sub                = au5_process_sub_split(s, input, sample_rate);
+    const float square_branch      = input - sub;
+    const float yoinked_square     = au5_process_comb_stack(s, square_branch, yoink, sample_rate);
+    const float protected_sub_path = sub_direct ? yoinked_square : sub + yoinked_square;
+
+    YoinkOutput output = {0};
+    output.pre_scream  = au5_process_dc_block(s, protected_sub_path, sample_rate);
+    output.direct_sub  = sub_direct ? sub : 0.0f;
+    return output;
+}
 
 void render_lfo(Plugin* p, float* buffer, int num_samples, int lfo_idx)
 {
@@ -471,6 +594,7 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
         float resonance = s.values[PARAM_RESONANCE].current;
         float in_gain   = s.values[PARAM_INPUT_GAIN].current;
         float wet       = s.values[PARAM_WET].current;
+        float yoink     = s.values[PARAM_YOINK].current;
 
 // #define CUTOFF_MAX    MIDI_NOTE_NUM_20kHz
 #define CUTOFF_MAX (MIDI_NOTE_NUM_20kHz)
@@ -509,7 +633,7 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
 
         const bool smooth_params = s.values[PARAM_CUTOFF].remaining > 0 | s.values[PARAM_SCREAM].remaining > 0 |
                                    s.values[PARAM_RESONANCE].remaining > 0 | s.values[PARAM_INPUT_GAIN].remaining > 0 |
-                                   s.values[PARAM_WET].remaining > 0;
+                                   s.values[PARAM_WET].remaining > 0 | s.values[PARAM_YOINK].remaining > 0;
 
         const bool has_modulation_or_smoothing = !!lfo_1_mod_flags || !!lfo_2_mod_flags || smooth_params;
 
@@ -574,6 +698,7 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
                 resonance = modvals[PARAM_RESONANCE];
                 in_gain   = modvals[PARAM_INPUT_GAIN];
                 wet       = modvals[PARAM_WET];
+                yoink     = modvals[PARAM_YOINK];
 
                 lp_Q = xm_lerpf(resonance, LP_Q_MIN, LP_Q_MAX);
                 hp_Q = xm_lerpf(resonance, HP_Q_MIN, HP_Q_MAX);
@@ -597,7 +722,19 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
                 hp_c = filter_HP(hp_cutoff, hp_Q, fs_inv);
             } // !!has_modulation_or_smoothing
 
-            float x = audio[i];
+            const float dry = audio[i];
+            float       x   = dry;
+            float       direct_sub = 0.0f;
+
+            if (p->yoink_on)
+            {
+                YoinkOutput yoink_output =
+                    au5_process_yoink_core(&p->yoink_state[ch], x, yoink, p->yoink_sub_direct_on, p->sample_rate);
+                x          = yoink_output.pre_scream;
+                direct_sub = yoink_output.direct_sub;
+            }
+
+            const float pre_scream = x;
 
             x *= in_gain;
 
@@ -619,7 +756,7 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
                 y = 0;
 
             // *it = xm_clampf(y, -1, 1);
-            audio[i] = wet * y + (1 - wet) * audio[i];
+            audio[i] = direct_sub + wet * y + (1 - wet) * pre_scream;
             // *it = x;
 
             // Feedback
@@ -994,13 +1131,12 @@ void cplug_process(void* _p, CplugProcessContext* ctx)
                     }
                 }
 
-                // A retrigger may happen on the first sample
-                if (i > 0)
-                {
-                    process_audio(p, output, frame + start_sample, i);
-                }
-                start_sample      += i;
-                remaining_samples -= i;
+                // A retrigger may happen on the first sample.
+                // Still process and advance one sample so the loop cannot stall.
+                int process_count = i > 0 ? i : 1;
+                process_audio(p, output, frame + start_sample, process_count);
+                start_sample      += process_count;
+                remaining_samples -= process_count;
                 xassert(remaining_samples >= 0);
             }
 

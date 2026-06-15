@@ -181,11 +181,14 @@ void https_post(https_response* res, const char* hostname, int port, const char*
 
 void https_cancel(https_response* res, xt_thread_ptr_t* thread)
 {
-    xassert(xthread_current() != *thread);
-    if (xt_atomic_load_u64(&res->flags) & FLAG_HTTPS_THREAD_RUNNING)
-    {
-        xt_atomic_fetch_or_u64(&res->flags, FLAG_HTTPS_THREAD_CANCEL);
+    if (thread == NULL || *thread == NULL)
+        return;
 
+    xassert(xthread_current() != *thread);
+    xt_atomic_fetch_or_u64(&res->flags, FLAG_HTTPS_THREAD_CANCEL);
+
+    if (*thread != NULL)
+    {
         xthread_join(*thread);
         xthread_destroy(*thread);
         *thread = NULL;

@@ -3,11 +3,20 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum OS X deployment ve
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
 
 project(Scream
-    VERSION 1.0.11
+    VERSION 1.1.1
     DESCRIPTION ""
     HOMEPAGE_URL "https://github.com/Cure-Audio/Scream"
     LANGUAGES C)
+
+option(SCREAM_AUTO_INSTALL "Copy built Scream plugins into system plugin folders after build" OFF)
+
 set(COMPANY_NAME "Cure Audio")
+
+set(VST3_MODULEINFO_JSON "${CMAKE_BINARY_DIR}/moduleinfo.json")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/moduleinfo.json.in"
+    "${VST3_MODULEINFO_JSON}"
+    @ONLY)
 
 set(PRODUCT_NAME ${PROJECT_NAME}) # used by info.plist
 set(PRODUCT_COPYRIGHT ${COMPANY_NAME})
@@ -300,20 +309,26 @@ elseif(WIN32)
         COMMAND ${CMAKE_COMMAND} -E echo "Building VST3"
         COMMAND ${CMAKE_COMMAND} -E make_directory ${VST3_BUILD_PATH}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${VST3_BUILD_PATH}/Contents"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${VST3_BUILD_PATH}/Contents/Resources"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${VST3_BUILD_PATH}/Contents/x86_64-win"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}/${PROJECT_NAME}_plugin.dll" "${VST3_BUILD_PATH}/Contents/x86_64-win/${PROJECT_NAME}.vst3"
+        COMMAND ${CMAKE_COMMAND} -E copy "${VST3_MODULEINFO_JSON}" "${VST3_BUILD_PATH}/Contents/Resources/moduleinfo.json"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/assets/PlugIn.ico"                      "${VST3_BUILD_PATH}/PlugIn.ico"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/assets/desktop.ini.in"                  "${VST3_BUILD_PATH}/desktop.ini"
         COMMAND attrib +s +h ${VST3_BUILD_PATH}/desktop.ini
         COMMAND attrib +s +h ${VST3_BUILD_PATH}/PlugIn.ico
         COMMAND attrib +s ${VST3_BUILD_PATH}
+        )
 
+    if(SCREAM_AUTO_INSTALL)
+        add_custom_command(TARGET ${PROJECT_NAME}_plugin POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E echo "Installing ${VST3_BUILD_PATH} to C:\\Program Files\\Common Files\\VST3"
         COMMAND ${CMAKE_COMMAND} -E copy_directory  "${VST3_BUILD_PATH}" "C:\\Program Files\\Common Files\\VST3\\${PROJECT_NAME}.vst3"
 
         COMMAND ${CMAKE_COMMAND} -E echo "Installing ${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}/${PROJECT_NAME}_plugin.dll to C:\\Program Files\\Common Files\\CLAP\\${PROJECT_NAME}.clap"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}/${PROJECT_NAME}_plugin.dll" "C:\\Program Files\\Common Files\\CLAP\\${PROJECT_NAME}.clap"
         )
+    endif()
     target_link_libraries(${PROJECT_NAME}_plugin PRIVATE ${PLUGIN_LIBRARIES})
     target_include_directories(${PROJECT_NAME}_plugin PRIVATE ${PLUGIN_INCLUDE})
     target_compile_definitions(${PROJECT_NAME}_plugin PRIVATE ${PLUGIN_DEFINITIONS} CPLUG_BUILD_VST3 CPLUG_BUILD_CLAP CPLUG_BUILD_AUV2)

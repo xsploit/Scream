@@ -1147,7 +1147,7 @@ void pw_tick(void* _gui)
         ROTARY_PARAM_OUTER_DIAMETER = 160,
         ROTARY_PARAM_INNER_DIAMETER = 80,
 
-        _MINIMUM_WIDTH = PARAMS_BOUNDARY_LEFT * 2 + VERTICAL_SLIDER_WIDTH * 2 + ROTARY_PARAM_OUTER_DIAMETER * 3,
+        _MINIMUM_WIDTH = PARAMS_BOUNDARY_LEFT * 2 + VERTICAL_SLIDER_WIDTH * 2 + ROTARY_PARAM_OUTER_DIAMETER * 4,
     };
     // 75% min width is the new minimum scale
     const int min_width = ((_MINIMUM_WIDTH * 3) / 4);
@@ -1199,15 +1199,16 @@ void pw_tick(void* _gui)
 
         {
             _Static_assert(
-                ARRLEN(lm->param_positions_cx) == 5,
-                "You've changed the number of params and we assumed there were only 5");
+                ARRLEN(lm->param_positions_cx) == 6,
+                "You've changed the number of params and we assumed there were only 6");
             imgui_rect rects[ARRLEN(lm->param_positions_cx)] = {0};
 
             rects[0].r = veritcal_slider_width;
             rects[1].r = knob_diameter;
             rects[2].r = knob_diameter;
             rects[3].r = knob_diameter;
-            rects[4].r = veritcal_slider_width;
+            rects[4].r = knob_diameter;
+            rects[5].r = veritcal_slider_width;
             layout_horizontal_fill(
                 rects,
                 ARRLEN(rects),
@@ -1465,13 +1466,14 @@ void pw_tick(void* _gui)
     // Params
     // / *
     {
-        static const ParamID param_ids[] = {PARAM_INPUT_GAIN, PARAM_CUTOFF, PARAM_SCREAM, PARAM_RESONANCE, PARAM_WET};
+        static const ParamID param_ids[] = {
+            PARAM_INPUT_GAIN, PARAM_CUTOFF, PARAM_SCREAM, PARAM_YOINK, PARAM_RESONANCE, PARAM_WET};
         _Static_assert(ARRLEN(param_ids) == ARRLEN(lm->param_positions_cx), "");
 
         // Param labels
         const float fsize = 14 * lm->param_scale;
 
-        static const char* NAMES[] = {"INPUT", "CUTOFF", "SCREAM", "RESONANCE", "WET"};
+        static const char* NAMES[] = {"INPUT", "CUTOFF", "SCREAM", "YOINK", "RESONANCE", "WET"};
         _Static_assert(ARRLEN(NAMES) == ARRLEN(lm->param_positions_cx));
         for (int i = 0; i < ARRLEN(lm->param_positions_cx); i++)
         {
@@ -1645,6 +1647,7 @@ void pw_tick(void* _gui)
             {
             case PARAM_CUTOFF:
             case PARAM_SCREAM:
+            case PARAM_YOINK:
             case PARAM_RESONANCE:
             {
                 enum
@@ -2348,6 +2351,43 @@ void pw_tick(void* _gui)
         bool  autogain_on = p->autogain_on;
         xvg_draw_text(bg, rect.x, cy, "AUTOGAIN", NULL, fsize, XVG_ALIGN_CL, C_TEXT_DARK_BG);
         draw_checkbox(bg, checkbox_height, cy, rect.r, lm->param_scale, autogain_on);
+
+        // Yoink Core
+        rect.x = rect.r + BORDER_PADDING * 4;
+        rect.r = rect.x + 112 * lm->param_scale;
+
+        events = imgui_get_events_rect(im, 'yoik', &rect);
+
+        static const char* DESCRIPTION_YOINK =
+            "When Yoink Core is on, Scream's input first runs through the AU5 Square4 feed-forward comb stack.";
+        tooltip_handle_events(&gui->tooltip, rect, DESCRIPTION_YOINK, gui->frame_start_time, events);
+        if (events & IMGUI_EVENT_MOUSE_ENTER)
+            pw_set_mouse_cursor(gui->pw, PW_CURSOR_HAND_POINT);
+        if (events & IMGUI_EVENT_MOUSE_LEFT_DOWN)
+            p->yoink_on ^= 1;
+
+        bool yoink_on = p->yoink_on;
+        xvg_draw_text(bg, rect.x, cy, "YOINK CORE", NULL, fsize, XVG_ALIGN_CL, C_TEXT_DARK_BG);
+        draw_checkbox(bg, checkbox_height, cy, rect.r, lm->param_scale, yoink_on);
+
+        // Sub Direct
+        rect.x = rect.r + BORDER_PADDING * 4;
+        rect.r = rect.x + 112 * lm->param_scale;
+
+        events = imgui_get_events_rect(im, 'ysub', &rect);
+
+        static const char* DESCRIPTION_SUB_DIRECT =
+            "When Sub Direct is on, Yoink splits the low band before Scream. The sub bypasses Scream's "
+            "saturation/filter path and is summed back after the damaged branch.";
+        tooltip_handle_events(&gui->tooltip, rect, DESCRIPTION_SUB_DIRECT, gui->frame_start_time, events);
+        if (events & IMGUI_EVENT_MOUSE_ENTER)
+            pw_set_mouse_cursor(gui->pw, PW_CURSOR_HAND_POINT);
+        if (events & IMGUI_EVENT_MOUSE_LEFT_DOWN)
+            p->yoink_sub_direct_on ^= 1;
+
+        bool yoink_sub_direct_on = p->yoink_sub_direct_on;
+        xvg_draw_text(bg, rect.x, cy, "SUB DIRECT", NULL, fsize, XVG_ALIGN_CL, C_TEXT_DARK_BG);
+        draw_checkbox(bg, checkbox_height, cy, rect.r, lm->param_scale, yoink_sub_direct_on);
 
         // Keytracking
         rect.x = rect.r + BORDER_PADDING * 4;

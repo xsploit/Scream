@@ -36,7 +36,7 @@ typedef struct LayoutMetrics
     float top_content_bottom;
 
     // Params
-    float param_positions_cx[5];
+    float param_positions_cx[6];
     float param_scale;
 
     float knob_outer_radius;

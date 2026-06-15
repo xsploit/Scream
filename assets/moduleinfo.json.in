@@ -1,0 +1,46 @@
+{
+  "Name": "@PROJECT_NAME@",
+  "Version": "@PROJECT_VERSION@",
+  "Factory Info": {
+    "Vendor": "@COMPANY_NAME@",
+    "URL": "@PROJECT_HOMEPAGE_URL@",
+    "E-Mail": "contact@cure.audio",
+    "Flags": {
+      "Unicode": true,
+      "Classes Discardable": false,
+      "Component Non Discardable": false
+    }
+  },
+  "Classes": [
+    {
+      "CID": "43757265636F6D705343524D00000000",
+      "Category": "Audio Module Class",
+      "Name": "@PROJECT_NAME@",
+      "Vendor": "@COMPANY_NAME@",
+      "Version": "@PROJECT_VERSION@",
+      "SDKVersion": "VST 3",
+      "Sub Categories": [
+        "Fx",
+        "Filter"
+      ],
+      "Class Flags": 0,
+      "Cardinality": 2147483647,
+      "Snapshots": []
+    },
+    {
+      "CID": "43757265656469745343524D00000000",
+      "Category": "Component Controller Class",
+      "Name": "@PROJECT_NAME@",
+      "Vendor": "@COMPANY_NAME@",
+      "Version": "@PROJECT_VERSION@",
+      "SDKVersion": "VST 3",
+      "Sub Categories": [
+        "Fx",
+        "Filter"
+      ],
+      "Class Flags": 0,
+      "Cardinality": 2147483647,
+      "Snapshots": []
+    }
+  ]
+}

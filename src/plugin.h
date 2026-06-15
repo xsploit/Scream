@@ -20,6 +20,7 @@ typedef enum ParamID
     PARAM_RESONANCE,
     PARAM_INPUT_GAIN,
     PARAM_WET,
+    PARAM_YOINK,
     PARAM_OUTPUT_GAIN,
 
     PARAM_PATTERN_LFO_1,
@@ -42,6 +43,7 @@ static const char* PARAM_STR[] = {
     "PARAM_RESONANCE",
     "PARAM_INPUT_GAIN",
     "PARAM_WET",
+    "PARAM_YOINK",
     "PARAM_OUTPUT_GAIN",
     "PARAM_PATTERN_LFO_1",
     "PARAM_PATTERN_LFO_2",
@@ -65,7 +67,10 @@ _Static_assert(ARRLEN(PARAM_STR) == PARAM_COUNT, "");
 
 enum
 {
-    NUM_AUTOMATABLE_PARAMS = PARAM_WET + 1,
+    NUM_AUTOMATABLE_PARAMS = PARAM_YOINK + 1,
+
+    YOINK_COMB_STAGE_COUNT = 4,
+    YOINK_DELAY_BUFFER_SIZE = 8192,
 
     NUM_LFO_PATTERNS = 8,
 
@@ -177,6 +182,8 @@ typedef struct Plugin
     bool    lfo_section_open;
     uint8_t selected_lfo_idx;
     bool    autogain_on;         // default on
+    bool    yoink_on;            // default on
+    bool    yoink_sub_direct_on; // default on
     bool    midi_keytracking_on; // default off
     int     keytracking_last_midi_note;
 
@@ -233,7 +240,18 @@ typedef struct Plugin
 
         float lp[2];
         float hp[2];
+
     } state[2];
+
+    struct YoinkState
+    {
+        float yoink_delay_lines[YOINK_COMB_STAGE_COUNT][YOINK_DELAY_BUFFER_SIZE];
+        int   yoink_delay_write_index[YOINK_COMB_STAGE_COUNT];
+        float yoink_sub_z1;
+        float yoink_sub_z2;
+        float yoink_dc_prev_input;
+        float yoink_dc_prev_output;
+    } yoink_state[2];
     SmoothedValue output_gain;
 
     // Event stuff

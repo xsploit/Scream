@@ -69,9 +69,48 @@ typedef struct PluginStatev0_3_0
 
     size_t        blob_length;
     unsigned char blob[];
+} PluginStatev0_3_0;
+
+typedef struct PluginStatev1_1_0
+{
+    double params[15];
+
+    xvec2f lfo_mod_amounts[6];
+
+    bool    autogain_on;         // default on
+    bool    yoink_on;            // default on
+    bool    midi_keytracking_on; // default off
+    uint8_t lfo_loop_type[2];    // LFOLoopType
+    uint8_t selected_lfo_idx;
+    char    _padding_2[1]; // unused
+
+    LFOv0_2_4 lfos[2];
+
+    size_t        blob_length;
+    unsigned char blob[];
+} PluginStatev1_1_0;
+
+typedef struct PluginStatev1_1_1
+{
+    double params[15];
+
+    xvec2f lfo_mod_amounts[6];
+
+    bool    autogain_on;         // default on
+    bool    yoink_on;            // default on
+    bool    yoink_sub_direct_on; // default on
+    bool    midi_keytracking_on; // default off
+    uint8_t lfo_loop_type[2];    // LFOLoopType
+    uint8_t selected_lfo_idx;
+    char    _padding_2[1]; // unused
+
+    LFOv0_2_4 lfos[2];
+
+    size_t        blob_length;
+    unsigned char blob[];
 } PluginState;
-_Static_assert(PARAM_COUNT == 14, "Num params changed, update state");
-_Static_assert(NUM_AUTOMATABLE_PARAMS == 5, "Num autotable params changed, update state");
+_Static_assert(PARAM_COUNT == 15, "Num params changed, update state");
+_Static_assert(NUM_AUTOMATABLE_PARAMS == 6, "Num autotable params changed, update state");
 _Static_assert(NUM_LFO_PATTERNS == 8, "Max LFO patterns changed, update state");
 
 // Between v0.2.5 and v0.3, the parameters PARAM_RETRIG_LFO_1 & PARAM_RETRIG_LFO_2 were deprecated. Note the parameter
@@ -129,6 +168,8 @@ void cplug_saveState(void* _p, const void* stateCtx, cplug_writeProc writeProc)
     memcpy(state->lfo_mod_amounts, p->lfo_mod_amounts, sizeof(p->lfo_mod_amounts));
 
     state->autogain_on         = p->autogain_on;
+    state->yoink_on            = p->yoink_on;
+    state->yoink_sub_direct_on = p->yoink_sub_direct_on;
     state->midi_keytracking_on = p->midi_keytracking_on;
     state->lfo_loop_type[0]    = p->lfo_loop_type[0];
     state->lfo_loop_type[1]    = p->lfo_loop_type[1];
@@ -229,6 +270,8 @@ void cplug_loadState(void* _p, const void* stateCtx, cplug_readProc readProc)
         static const plugin_version v0_0_3 = {.patch = 3};
         static const plugin_version v0_2_4 = {.minor = 2, .patch = 4};
         static const plugin_version v0_3_0 = {.minor = 3};
+        static const plugin_version v1_1_0 = {.major = 1, .minor = 1};
+        static const plugin_version v1_1_1 = {.major = 1, .minor = 1, .patch = 1};
         if (header.version.u32 < v0_0_3.u32)
         {
             PluginStatev0_0_1 state;
@@ -277,7 +320,7 @@ void cplug_loadState(void* _p, const void* stateCtx, cplug_readProc readProc)
         }
         else // if (header.version.u32 >= v0_2_4.u32)
         {
-            PluginState* state = xmalloc(header.size);
+            void* state = xmalloc(header.size);
 
             int64_t bytes_read = readProc(stateCtx, state, header.size);
 
@@ -287,74 +330,144 @@ void cplug_loadState(void* _p, const void* stateCtx, cplug_readProc readProc)
             }
             else
             {
-                if (header.version.u32 <= v0_2_4.u32)
+                LFOv0_2_4*   saved_lfos        = NULL;
+                unsigned char* saved_blob       = NULL;
+                size_t         saved_blob_length = 0;
+                xvec3f*        dst_points        = NULL;
+
+                if (header.version.u32 >= v1_1_1.u32 && header.size >= sizeof(PluginState))
                 {
-                    // Before v0.2.5, the "output gain" param existed but wasn't used.
-                    // Since v0.2.5 the default value was changed, so old saved projects will likely load with the old
-                    // and undesirable default value. Here we set the output gain to 100%, or 0dB so the user continues
-                    // to get the same gain
-                    state->params[5] = 1; // PARAM_OUTPUT_GAIN
+                    PluginState* current = state;
+                    state_update_params(p, current->params, ARRLEN(current->params));
+
+                    _Static_assert(sizeof(current->lfo_mod_amounts) == sizeof(p->lfo_mod_amounts), "");
+                    _Static_assert(ARRLEN(current->lfo_mod_amounts) == ARRLEN(p->lfo_mod_amounts), "");
+                    memcpy(p->lfo_mod_amounts, current->lfo_mod_amounts, sizeof(p->lfo_mod_amounts));
+
+                    p->autogain_on         = current->autogain_on;
+                    p->yoink_on            = current->yoink_on;
+                    p->yoink_sub_direct_on = current->yoink_sub_direct_on;
+                    p->midi_keytracking_on = current->midi_keytracking_on;
+                    p->lfo_loop_type[0]    = current->lfo_loop_type[0];
+                    p->lfo_loop_type[1]    = current->lfo_loop_type[1];
+                    p->selected_lfo_idx    = current->selected_lfo_idx;
+
+                    saved_lfos        = current->lfos;
+                    saved_blob        = current->blob;
+                    saved_blob_length = current->blob_length;
                 }
-                if (header.version.u32 < v0_3_0.u32)
+                else if (header.version.u32 >= v1_1_0.u32 && header.size >= sizeof(PluginStatev1_1_0))
                 {
-                    // Between v0.2.5 and 0.3.0, params #14 & #15 were deprecated, and param #5 (output gain) is no
-                    // longer automatable. This leaves the regions of memory in the previous saved states redundant, and
-                    // I've chosen to reuse it to store the new state we introduced.
-                    // It is initialised with defaults here
-                    state->autogain_on         = true;
-                    state->midi_keytracking_on = false;
-                    state->lfo_loop_type[0]    = LFO_RETRIG;
-                    state->lfo_loop_type[1]    = LFO_RETRIG;
-                    state->selected_lfo_idx    = 0;
-                    memset(state->_padding_1, 0, sizeof(state->_padding_1));
-                    memset(state->_padding_2, 0, sizeof(state->_padding_2));
+                    PluginStatev1_1_0* previous = state;
+                    state_update_params(p, previous->params, ARRLEN(previous->params));
+
+                    _Static_assert(sizeof(previous->lfo_mod_amounts) == sizeof(p->lfo_mod_amounts), "");
+                    _Static_assert(ARRLEN(previous->lfo_mod_amounts) == ARRLEN(p->lfo_mod_amounts), "");
+                    memcpy(p->lfo_mod_amounts, previous->lfo_mod_amounts, sizeof(p->lfo_mod_amounts));
+
+                    p->autogain_on         = previous->autogain_on;
+                    p->yoink_on            = previous->yoink_on;
+                    p->yoink_sub_direct_on = true;
+                    p->midi_keytracking_on = previous->midi_keytracking_on;
+                    p->lfo_loop_type[0]    = previous->lfo_loop_type[0];
+                    p->lfo_loop_type[1]    = previous->lfo_loop_type[1];
+                    p->selected_lfo_idx    = previous->selected_lfo_idx;
+
+                    saved_lfos        = previous->lfos;
+                    saved_blob        = previous->blob;
+                    saved_blob_length = previous->blob_length;
                 }
-                state_update_params(p, state->params, ARRLEN(state->params));
-
-                _Static_assert(sizeof(state->lfo_mod_amounts) == sizeof(p->lfo_mod_amounts), "");
-                _Static_assert(ARRLEN(state->lfo_mod_amounts) == ARRLEN(p->lfo_mod_amounts), "");
-                memcpy(p->lfo_mod_amounts, state->lfo_mod_amounts, sizeof(p->lfo_mod_amounts));
-
-                p->autogain_on         = state->autogain_on;
-                p->midi_keytracking_on = state->midi_keytracking_on;
-                p->lfo_loop_type[0]    = state->lfo_loop_type[0];
-                p->lfo_loop_type[1]    = state->lfo_loop_type[1];
-                p->selected_lfo_idx    = state->selected_lfo_idx;
-
-                // spare array
-                xvec3f* dst_points = NULL;
-
-                for (int lfo_idx = 0; lfo_idx < ARRLEN(state->lfos); lfo_idx++)
+                else if (header.size >= offsetof(PluginStatev0_3_0, blob))
                 {
-                    LFO* lfo = p->lfos + lfo_idx;
+                    PluginStatev0_3_0* previous = state;
 
-                    _Static_assert(sizeof(lfo->grid_x) == sizeof(state->lfos[lfo_idx].grid_x), "");
-                    _Static_assert(sizeof(lfo->grid_y) == sizeof(state->lfos[lfo_idx].grid_y), "");
-                    memcpy(lfo->grid_x, state->lfos[lfo_idx].grid_x, sizeof(lfo->grid_x));
-                    memcpy(lfo->grid_y, state->lfos[lfo_idx].grid_y, sizeof(lfo->grid_y));
-
-                    for (int pattern_idx = 0; pattern_idx < ARRLEN(state->lfos[lfo_idx].patterns); pattern_idx++)
+                    if (header.version.u32 <= v0_2_4.u32)
                     {
-                        LFOPointArrayHeaderv0_2_4* arrheader = &state->lfos[lfo_idx].patterns[pattern_idx];
+                        // Before v0.2.5, the "output gain" param existed but wasn't used.
+                        previous->params[5] = 1; // old PARAM_OUTPUT_GAIN
+                    }
 
-                        size_t  src_npoints = arrheader->array_length;
-                        xvec3f* src_points  = (xvec3f*)(state->blob + arrheader->blob_offset);
+                    if (header.version.u32 < v0_3_0.u32)
+                    {
+                        previous->autogain_on         = true;
+                        previous->midi_keytracking_on = false;
+                        previous->lfo_loop_type[0]    = LFO_RETRIG;
+                        previous->lfo_loop_type[1]    = LFO_RETRIG;
+                        previous->selected_lfo_idx    = 0;
+                        memset(previous->_padding_1, 0, sizeof(previous->_padding_1));
+                        memset(previous->_padding_2, 0, sizeof(previous->_padding_2));
+                    }
 
-                        xarr_setlen(dst_points, src_npoints);
+                    double migrated_params[PARAM_COUNT] = {0};
+                    for (int i = 0; i < PARAM_COUNT; i++)
+                        migrated_params[i] = cplug_getDefaultParameterValue(p, i);
 
-                        size_t num_bytes = sizeof(*dst_points) * src_npoints;
-                        xassert(arrheader->blob_offset + num_bytes <= state->blob_length);
+                    migrated_params[PARAM_CUTOFF]       = previous->params[0];
+                    migrated_params[PARAM_SCREAM]       = previous->params[1];
+                    migrated_params[PARAM_RESONANCE]    = previous->params[2];
+                    migrated_params[PARAM_INPUT_GAIN]   = previous->params[3];
+                    migrated_params[PARAM_WET]          = previous->params[4];
+                    migrated_params[PARAM_OUTPUT_GAIN]  = previous->params[5];
+                    migrated_params[PARAM_YOINK]        = cplug_getDefaultParameterValue(p, PARAM_YOINK);
 
-                        memcpy(dst_points, src_points, num_bytes);
+                    for (int old_param = 6; old_param < ARRLEN(previous->params); old_param++)
+                    {
+                        const int new_param = old_param + 1;
+                        if (new_param < PARAM_COUNT)
+                            migrated_params[new_param] = previous->params[old_param];
+                    }
 
-                        // !!! Audio is still running when running cplug_loadState()
+                    state_update_params(p, migrated_params, ARRLEN(migrated_params));
+
+                    memset(p->lfo_mod_amounts, 0, sizeof(p->lfo_mod_amounts));
+                    for (int i = 0; i < ARRLEN(previous->lfo_mod_amounts); i++)
+                        p->lfo_mod_amounts[i] = previous->lfo_mod_amounts[i];
+
+                    p->autogain_on         = previous->autogain_on;
+                    p->yoink_on            = true;
+                    p->yoink_sub_direct_on = true;
+                    p->midi_keytracking_on = previous->midi_keytracking_on;
+                    p->lfo_loop_type[0]    = previous->lfo_loop_type[0];
+                    p->lfo_loop_type[1]    = previous->lfo_loop_type[1];
+                    p->selected_lfo_idx    = previous->selected_lfo_idx;
+
+                    saved_lfos        = previous->lfos;
+                    saved_blob        = previous->blob;
+                    saved_blob_length = previous->blob_length;
+                }
+
+                if (saved_lfos != NULL && saved_blob != NULL)
+                {
+                    for (int lfo_idx = 0; lfo_idx < ARRLEN(p->lfos); lfo_idx++)
+                    {
+                        LFO* lfo = p->lfos + lfo_idx;
+
+                        memcpy(lfo->grid_x, saved_lfos[lfo_idx].grid_x, sizeof(lfo->grid_x));
+                        memcpy(lfo->grid_y, saved_lfos[lfo_idx].grid_y, sizeof(lfo->grid_y));
+
+                        for (int pattern_idx = 0; pattern_idx < ARRLEN(saved_lfos[lfo_idx].patterns); pattern_idx++)
                         {
-                            xt_spinlock_lock(&lfo->spinlocks[pattern_idx]);
+                            LFOPointArrayHeaderv0_2_4* arrheader = &saved_lfos[lfo_idx].patterns[pattern_idx];
 
-                            dst_points =
-                                xt_atomic_exchange_ptr((xt_atomic_ptr_t*)&lfo->points[pattern_idx], dst_points);
+                            size_t  src_npoints = arrheader->array_length;
+                            xvec3f* src_points  = (xvec3f*)(saved_blob + arrheader->blob_offset);
 
-                            xt_spinlock_unlock(&lfo->spinlocks[pattern_idx]);
+                            xarr_setlen(dst_points, src_npoints);
+
+                            size_t num_bytes = sizeof(*dst_points) * src_npoints;
+                            xassert(arrheader->blob_offset + num_bytes <= saved_blob_length);
+
+                            memcpy(dst_points, src_points, num_bytes);
+
+                            // !!! Audio is still running when running cplug_loadState()
+                            {
+                                xt_spinlock_lock(&lfo->spinlocks[pattern_idx]);
+
+                                dst_points =
+                                    xt_atomic_exchange_ptr((xt_atomic_ptr_t*)&lfo->points[pattern_idx], dst_points);
+
+                                xt_spinlock_unlock(&lfo->spinlocks[pattern_idx]);
+                            }
                         }
                     }
                 }

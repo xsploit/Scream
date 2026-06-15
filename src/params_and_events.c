@@ -287,6 +287,7 @@ bool param_string_to_value(uint32_t param_id, const char* str, double* val)
             *val = log(*val / 20.0) / log(2.0) / 10.0; // Normalise Hz
         break;
     case PARAM_SCREAM:
+    case PARAM_YOINK:
     case PARAM_RESONANCE:
     case PARAM_WET:
         if ((ok = sscanf(str, "%lf%%", val)))
@@ -360,6 +361,7 @@ int param_value_to_string(ParamID paramId, char* buf, size_t bufsize, double val
         break;
     }
     case PARAM_SCREAM:
+    case PARAM_YOINK:
     case PARAM_RESONANCE:
     case PARAM_WET:
         n = xtr_fmt(buf, bufsize, 0, "%.2f%%", value * 100);
@@ -452,6 +454,7 @@ void cplug_getParameterName(void* p, uint32_t paramId, char* buf, size_t buflen)
         "Resonance",
         "Input",
         "Wet",
+        "Yoink",
         "Output",
         "LFO 1 Pattern",
         "LFO 2 Pattern",
@@ -507,6 +510,9 @@ double cplug_getDefaultParameterValue(void* _p, uint32_t paramId)
     }
     case PARAM_WET:
         v = 1;
+        break;
+    case PARAM_YOINK:
+        v = 44.0 / 127.0;
         break;
     case PARAM_PATTERN_LFO_1:
     case PARAM_PATTERN_LFO_2:
