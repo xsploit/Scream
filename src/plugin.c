@@ -373,15 +373,16 @@ static inline float au5_process_sub_split(struct YoinkState* s, float input, dou
     return finite_guard(s->yoink_sub_z2);
 }
 
-static inline float au5_process_dc_block(struct YoinkState* s, float input, double sample_rate)
+static inline float
+au5_process_dc_block(float input, float* previous_input, float* previous_output, double sample_rate)
 {
     const float safe_sample_rate = (float)(sample_rate > 0 ? sample_rate : 44100.0);
     const float r                = expf(-XM_TAUf * 20.0f / safe_sample_rate);
-    const float output           = input - s->yoink_dc_prev_input + r * s->yoink_dc_prev_output;
+    const float output           = input - *previous_input + r * *previous_output;
 
-    s->yoink_dc_prev_input  = input;
-    s->yoink_dc_prev_output = finite_guard(output);
-    return s->yoink_dc_prev_output;
+    *previous_input  = finite_guard(input);
+    *previous_output = finite_guard(output);
+    return *previous_output;
 }
 
 typedef struct YoinkOutput
@@ -397,10 +398,19 @@ au5_process_yoink_core(struct YoinkState* s, float input, float yoink, bool sub_
     const float square_branch      = input - sub;
     const float yoinked_square     = au5_process_comb_stack(s, square_branch, yoink, sample_rate);
     const float protected_sub_path = sub_direct ? yoinked_square : sub + yoinked_square;
+    const float direct_sub         = au5_process_dc_block(
+        sub,
+        &s->yoink_direct_sub_dc_prev_input,
+        &s->yoink_direct_sub_dc_prev_output,
+        sample_rate);
 
     YoinkOutput output = {0};
-    output.pre_scream  = au5_process_dc_block(s, protected_sub_path, sample_rate);
-    output.direct_sub  = sub_direct ? sub : 0.0f;
+    output.pre_scream  = au5_process_dc_block(
+        protected_sub_path,
+        &s->yoink_dc_prev_input,
+        &s->yoink_dc_prev_output,
+        sample_rate);
+    output.direct_sub = sub_direct ? direct_sub : 0.0f;
     return output;
 }
 

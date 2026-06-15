@@ -251,6 +251,8 @@ typedef struct Plugin
         float yoink_sub_z2;
         float yoink_dc_prev_input;
         float yoink_dc_prev_output;
+        float yoink_direct_sub_dc_prev_input;
+        float yoink_direct_sub_dc_prev_output;
     } yoink_state[2];
     SmoothedValue output_gain;
 
