@@ -1100,6 +1100,276 @@ bool do_bg_command_lists_match(GUI* gui)
     return match;
 }
 
+#define PRESET_NORM_DB(db, min_db, max_db) (((db) - (min_db)) / ((max_db) - (min_db)))
+#define PRESET_INPUT_DB(db) PRESET_NORM_DB((db), RANGE_INPUT_GAIN_MIN, RANGE_INPUT_GAIN_MAX)
+#define PRESET_OUTPUT_DB(db) PRESET_NORM_DB((db), RANGE_OUTPUT_GAIN_MIN, RANGE_OUTPUT_GAIN_MAX)
+#define PRESET_TONE_DB(db) PRESET_NORM_DB((db), RANGE_TONE_GAIN_MIN, RANGE_TONE_GAIN_MAX)
+#define PRESET_YOINK_CC(cc) ((cc) / 127.0)
+#define PRESET_PARAMS(cutoff, scream, resonance, input_db, wet, yoink, output_db, lfo1_rate, lfo2_rate, low_db, mid_db, high_db) \
+    {                                                                                                                         \
+        (cutoff),                                                                                                             \
+        (scream),                                                                                                             \
+        (resonance),                                                                                                          \
+        PRESET_INPUT_DB(input_db),                                                                                            \
+        (wet),                                                                                                                \
+        (yoink),                                                                                                              \
+        PRESET_OUTPUT_DB(output_db),                                                                                          \
+        0.0,                                                                                                                  \
+        0.0,                                                                                                                  \
+        0.0,                                                                                                                  \
+        0.0,                                                                                                                  \
+        (double)(lfo1_rate),                                                                                                  \
+        (double)(lfo2_rate),                                                                                                  \
+        0.5,                                                                                                                  \
+        0.5,                                                                                                                  \
+        PRESET_TONE_DB(low_db),                                                                                               \
+        PRESET_TONE_DB(mid_db),                                                                                               \
+        PRESET_TONE_DB(high_db),                                                                                              \
+    }
+
+typedef struct FactoryPreset
+{
+    const char* name;
+    double      params[PARAM_COUNT];
+    xvec2f      lfo_mod_amounts[NUM_AUTOMATABLE_PARAMS];
+    LFOLoopType lfo_loop_type[2];
+    bool        autogain_on;
+    bool        yoink_on;
+    bool        yoink_sub_direct_on;
+    bool        yoink_sub_follow_on;
+    bool        midi_keytracking_on;
+} FactoryPreset;
+
+static const FactoryPreset FACTORY_PRESETS[] = {
+    {
+        .name                 = "INIT RACK",
+        .params               = PRESET_PARAMS(0.85, 0.465, 1.0, 0.0, 1.0, PRESET_YOINK_CC(44.0), -6.0, LFO_RATE_1_4, LFO_RATE_1_4, 0.0, 0.0, 0.0),
+        .lfo_loop_type        = {LFO_RETRIG, LFO_RETRIG},
+        .autogain_on          = true,
+        .yoink_on             = true,
+        .yoink_sub_direct_on  = true,
+        .yoink_sub_follow_on  = true,
+        .midi_keytracking_on  = false,
+    },
+    {
+        .name                 = "SUB CLEAN",
+        .params               = PRESET_PARAMS(0.86, 0.40, 0.90, -1.0, 0.88, PRESET_YOINK_CC(38.0), -6.0, LFO_RATE_1_4, LFO_RATE_1_8, 2.0, -1.0, -1.5),
+        .lfo_loop_type        = {LFO_RETRIG, LFO_RETRIG},
+        .autogain_on          = true,
+        .yoink_on             = true,
+        .yoink_sub_direct_on  = true,
+        .yoink_sub_follow_on  = false,
+        .midi_keytracking_on  = false,
+    },
+    {
+        .name                 = "SUB FOLLOW",
+        .params               = PRESET_PARAMS(0.84, 0.48, 1.0, 0.0, 1.0, PRESET_YOINK_CC(52.0), -7.0, LFO_RATE_1_4, LFO_RATE_1_8, 1.0, 1.0, 0.0),
+        .lfo_mod_amounts      = {[PARAM_YOINK] = {.left = 0.12f}},
+        .lfo_loop_type        = {LFO_LOOP, LFO_RETRIG},
+        .autogain_on          = true,
+        .yoink_on             = true,
+        .yoink_sub_direct_on  = true,
+        .yoink_sub_follow_on  = true,
+        .midi_keytracking_on  = false,
+    },
+    {
+        .name                 = "1/4 MOTION",
+        .params               = PRESET_PARAMS(0.82, 0.50, 0.95, -1.5, 0.96, PRESET_YOINK_CC(44.0), -8.0, LFO_RATE_1_4, LFO_RATE_1_8, 0.0, 1.5, 1.0),
+        .lfo_mod_amounts      = {[PARAM_CUTOFF] = {.left = 0.08f}, [PARAM_YOINK] = {.left = 0.22f}},
+        .lfo_loop_type        = {LFO_LOOP, LFO_RETRIG},
+        .autogain_on          = true,
+        .yoink_on             = true,
+        .yoink_sub_direct_on  = true,
+        .yoink_sub_follow_on  = true,
+        .midi_keytracking_on  = false,
+    },
+    {
+        .name                 = "1/8 RIP",
+        .params               = PRESET_PARAMS(0.90, 0.58, 1.0, -3.0, 1.0, PRESET_YOINK_CC(61.0), -9.0, LFO_RATE_1_8, LFO_RATE_1_16, -1.5, 2.0, 3.5),
+        .lfo_mod_amounts      = {[PARAM_SCREAM] = {.left = -0.10f}, [PARAM_YOINK] = {.left = 0.30f}},
+        .lfo_loop_type        = {LFO_LOOP, LFO_RETRIG},
+        .autogain_on          = true,
+        .yoink_on             = true,
+        .yoink_sub_direct_on  = true,
+        .yoink_sub_follow_on  = true,
+        .midi_keytracking_on  = false,
+    },
+    {
+        .name                 = "DARK BODY",
+        .params               = PRESET_PARAMS(0.72, 0.38, 0.88, 0.0, 0.94, PRESET_YOINK_CC(42.0), -6.5, LFO_RATE_1_4, LFO_RATE_1_8, 5.0, -2.0, -6.0),
+        .lfo_loop_type        = {LFO_RETRIG, LFO_RETRIG},
+        .autogain_on          = true,
+        .yoink_on             = true,
+        .yoink_sub_direct_on  = true,
+        .yoink_sub_follow_on  = true,
+        .midi_keytracking_on  = false,
+    },
+    {
+        .name                 = "BRIGHT TEAR",
+        .params               = PRESET_PARAMS(0.95, 0.58, 0.92, -2.0, 1.0, PRESET_YOINK_CC(49.0), -8.0, LFO_RATE_1_4, LFO_RATE_1_12, -2.0, 1.5, 5.0),
+        .lfo_mod_amounts      = {[PARAM_YOINK] = {.right = 0.10f}},
+        .lfo_loop_type        = {LFO_RETRIG, LFO_LOOP},
+        .autogain_on          = true,
+        .yoink_on             = true,
+        .yoink_sub_direct_on  = true,
+        .yoink_sub_follow_on  = true,
+        .midi_keytracking_on  = false,
+    },
+    {
+        .name                 = "MID BITE",
+        .params               = PRESET_PARAMS(0.88, 0.52, 0.92, -1.0, 0.90, PRESET_YOINK_CC(47.0), -7.0, LFO_RATE_1_4, LFO_RATE_1_8, -1.0, 6.0, 0.5),
+        .lfo_loop_type        = {LFO_RETRIG, LFO_RETRIG},
+        .autogain_on          = true,
+        .yoink_on             = true,
+        .yoink_sub_direct_on  = true,
+        .yoink_sub_follow_on  = true,
+        .midi_keytracking_on  = false,
+    },
+    {
+        .name                 = "WET COMB",
+        .params               = PRESET_PARAMS(0.83, 0.50, 1.0, -2.0, 1.0, PRESET_YOINK_CC(72.0), -9.0, LFO_RATE_1_6, LFO_RATE_1_8, 0.0, -0.5, 2.0),
+        .lfo_mod_amounts      = {[PARAM_YOINK] = {.left = 0.08f}},
+        .lfo_loop_type        = {LFO_LOOP, LFO_RETRIG},
+        .autogain_on          = true,
+        .yoink_on             = true,
+        .yoink_sub_direct_on  = true,
+        .yoink_sub_follow_on  = true,
+        .midi_keytracking_on  = false,
+    },
+    {
+        .name                 = "SCREAM ONLY",
+        .params               = PRESET_PARAMS(0.82, 0.55, 0.85, -1.0, 1.0, PRESET_YOINK_CC(44.0), -7.0, LFO_RATE_1_4, LFO_RATE_1_8, 0.0, 0.0, 0.0),
+        .lfo_loop_type        = {LFO_RETRIG, LFO_RETRIG},
+        .autogain_on          = true,
+        .yoink_on             = false,
+        .yoink_sub_direct_on  = false,
+        .yoink_sub_follow_on  = false,
+        .midi_keytracking_on  = false,
+    },
+};
+
+_Static_assert(PARAM_COUNT == 18, "Preset params assume current parameter layout");
+_Static_assert(NUM_AUTOMATABLE_PARAMS == 6, "Preset LFO amounts assume current modulation layout");
+_Static_assert(ARRLEN(FACTORY_PRESETS) >= 10, "Need at least ten factory presets");
+
+static void apply_factory_preset(Plugin* p, int idx)
+{
+    idx = xm_clampi(idx, 0, ARRLEN(FACTORY_PRESETS) - 1);
+    const FactoryPreset* preset = FACTORY_PRESETS + idx;
+
+    for (int i = 0; i < PARAM_COUNT; i++)
+        param_set(p, i, preset->params[i]);
+
+    memcpy(p->lfo_mod_amounts, preset->lfo_mod_amounts, sizeof(p->lfo_mod_amounts));
+    p->lfo_loop_type[0]       = preset->lfo_loop_type[0];
+    p->lfo_loop_type[1]       = preset->lfo_loop_type[1];
+    p->autogain_on            = preset->autogain_on;
+    p->yoink_on               = preset->yoink_on;
+    p->yoink_sub_direct_on    = preset->yoink_sub_direct_on;
+    p->yoink_sub_follow_on    = preset->yoink_sub_follow_on;
+    p->midi_keytracking_on    = preset->midi_keytracking_on;
+    p->selected_preset_idx    = (uint8_t)idx;
+}
+
+static int find_matching_factory_preset(const Plugin* p)
+{
+    for (int preset_idx = 0; preset_idx < ARRLEN(FACTORY_PRESETS); preset_idx++)
+    {
+        const FactoryPreset* preset = FACTORY_PRESETS + preset_idx;
+        bool match = true;
+        for (int param_idx = 0; param_idx < PARAM_COUNT; param_idx++)
+        {
+            if (fabs(p->main_params[param_idx] - preset->params[param_idx]) > 1.0e-4)
+            {
+                match = false;
+                break;
+            }
+        }
+
+        if (match && 0 != memcmp(p->lfo_mod_amounts, preset->lfo_mod_amounts, sizeof(p->lfo_mod_amounts)))
+            match = false;
+        if (match && p->autogain_on != preset->autogain_on)
+            match = false;
+        if (match && p->yoink_on != preset->yoink_on)
+            match = false;
+        if (match && p->yoink_sub_direct_on != preset->yoink_sub_direct_on)
+            match = false;
+        if (match && p->yoink_sub_follow_on != preset->yoink_sub_follow_on)
+            match = false;
+        if (match && p->midi_keytracking_on != preset->midi_keytracking_on)
+            match = false;
+
+        if (match)
+            return preset_idx;
+    }
+    return -1;
+}
+
+static void draw_preset_chevron(XVGCommandList* xvg, imgui_rect rect, int direction, float scale, unsigned colour)
+{
+    const float cx     = rect_cx(&rect);
+    const float cy     = rect_cy(&rect);
+    const float hw     = 5.0f * scale;
+    const float hh     = 7.0f * scale;
+    const float stroke = xm_maxf(1.5f, 2.0f * scale);
+
+    float x_inner = cx + direction * hw * 0.5f;
+    float x_outer = cx - direction * hw * 0.5f;
+    xvg_draw_line_round(xvg, x_inner, cy - hh, x_outer, cy, stroke, colour);
+    xvg_draw_line_round(xvg, x_outer, cy, x_inner, cy + hh, stroke, colour);
+}
+
+static void draw_preset_selector(GUI* gui)
+{
+    Plugin*         p     = gui->plugin;
+    XVGCommandList* bg    = gui->xvg_bg;
+    XVGCommandList* xvg   = gui->xvg_anim;
+    LayoutMetrics*  lm    = &gui->layout;
+    imgui_context*   im    = &gui->imgui;
+    const float      scale = lm->param_scale;
+
+    const float strip_w = xm_minf(330.0f * scale, lm->content_r - lm->content_x - 160.0f * scale);
+    const float strip_h = 24.0f * scale;
+    imgui_rect  strip;
+    strip.x = floorf((lm->content_x + lm->content_r - strip_w) * 0.5f);
+    strip.r = strip.x + strip_w;
+    strip.y = floorf(lm->content_y + 10.0f * scale);
+    strip.b = strip.y + strip_h;
+
+    const float arrow_w = 32.0f * scale;
+    imgui_rect left     = {strip.x, strip.y, strip.x + arrow_w, strip.b};
+    imgui_rect right    = {strip.r - arrow_w, strip.y, strip.r, strip.b};
+    imgui_rect label    = {left.r, strip.y, right.x, strip.b};
+
+    int current_preset = find_matching_factory_preset(p);
+    int cycle_base     = current_preset >= 0 ? current_preset : p->selected_preset_idx;
+    cycle_base         = xm_clampi(cycle_base, 0, ARRLEN(FACTORY_PRESETS) - 1);
+
+    unsigned left_events  = imgui_get_events_rect(im, 'psl0', &left);
+    unsigned right_events = imgui_get_events_rect(im, 'psr0', &right);
+    if ((left_events | right_events) & IMGUI_EVENT_MOUSE_ENTER)
+        pw_set_mouse_cursor(gui->pw, PW_CURSOR_HAND_POINT);
+
+    if (left_events & IMGUI_EVENT_MOUSE_LEFT_DOWN)
+        apply_factory_preset(p, (cycle_base + ARRLEN(FACTORY_PRESETS) - 1) % ARRLEN(FACTORY_PRESETS));
+    if (right_events & IMGUI_EVENT_MOUSE_LEFT_DOWN)
+        apply_factory_preset(p, (cycle_base + 1) % ARRLEN(FACTORY_PRESETS));
+
+    if (current_preset < 0)
+        current_preset = find_matching_factory_preset(p);
+
+    xvg_draw_rectangle(bg, strip.x, strip.y, strip.r - strip.x, strip.b - strip.y, 8.0f * scale, 0, C_BG_DARK);
+    xvg_draw_rectangle(bg, strip.x, strip.y, strip.r - strip.x, strip.b - strip.y, 8.0f * scale, 1.0f * scale, C_GRID_SECONDARY);
+    xvg_draw_solid_rectangle(bg, left.r, strip.y + 4.0f * scale, 1.0f, strip_h - 8.0f * scale, C_GRID_SECONDARY);
+    xvg_draw_solid_rectangle(bg, right.x, strip.y + 4.0f * scale, 1.0f, strip_h - 8.0f * scale, C_GRID_SECONDARY);
+
+    draw_preset_chevron(xvg, left, -1, scale, C_TEXT_LIGHT_BG);
+    draw_preset_chevron(xvg, right, 1, scale, C_TEXT_LIGHT_BG);
+
+    const char* preset_name = current_preset >= 0 ? FACTORY_PRESETS[current_preset].name : "CUSTOM";
+    xvg_draw_text(bg, rect_cx(&label), rect_cy(&label), preset_name, NULL, 12.0f * scale, XVG_ALIGN_CC, C_TEXT_LIGHT_BG);
+}
+
 static void draw_drawer_toggle(GUI* gui, imgui_rect rect, const char* label, bool open, unsigned widget_id)
 {
     XVGCommandList* bg = gui->xvg_bg;
@@ -1118,11 +1388,11 @@ static void draw_drawer_toggle(GUI* gui, imgui_rect rect, const char* label, boo
     }
 
     float cy            = (rect.y + rect.b) * 0.5f;
-    float inner_padding = 12 * lm->param_scale;
-    float fsize         = lm->param_scale * 12;
+    float inner_padding = 10 * lm->param_scale;
+    float fsize         = lm->param_scale * 11;
     xvg_draw_text(bg, rect.x + inner_padding, cy, label, NULL, fsize, XVG_ALIGN_CL, C_TEXT_LIGHT_BG);
 
-    float tri_half_width = 5 * lm->param_scale;
+    float tri_half_width = 4 * lm->param_scale;
     float y1             = cy + tri_half_width * (1.0f / 3.0f);
     float y2             = cy - tri_half_width * (2.0f / 3.0f);
     if (!open)
@@ -1419,8 +1689,8 @@ void pw_tick(void* _gui)
         float     playhead       = (float)p->lfos[lfo_idx].phase;
         lm->current_lfo_playhead = lm->last_lfo_playhead = playhead;
 
-        float      lfo_btn_width = 64 * lm->param_scale;
-        float      lfo_btn_gap   = 8 * lm->param_scale;
+        float      lfo_btn_width = 78 * lm->param_scale;
+        float      lfo_btn_gap   = 12 * lm->param_scale;
         float      lfo_btn_total = lfo_btn_width * 2 + lfo_btn_gap;
         imgui_rect lfo_btn;
         lfo_btn.x              = (lm->width / 2) - lfo_btn_total * 0.5f;
@@ -1611,6 +1881,8 @@ void pw_tick(void* _gui)
         xvg_draw_text(xvg, rect.r, (rect.b - rect.y) * 0.5f, label, label + label_len, fsize, XVG_ALIGN_CR, C_GREY_1);
         xvg_draw_text(bg, rect.x, (rect.b - rect.y) * 0.5f, "OUTPUT", NULL, fsize, XVG_ALIGN_CL, C_TEXT_DARK_BG);
     }
+
+    draw_preset_selector(gui);
 
     // Params
     // / *

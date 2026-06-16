@@ -111,6 +111,7 @@ void* cplug_createPlugin(CplugHostContext* ctx)
 
     p->lfo_section_open           = true;
     p->tone_section_open          = false;
+    p->selected_preset_idx        = 0;
     p->autogain_on                = true;
     p->yoink_on                   = true;
     p->yoink_sub_direct_on        = true;

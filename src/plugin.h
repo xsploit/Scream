@@ -190,6 +190,7 @@ typedef struct Plugin
     int     width, height; // retained gui size
     bool    lfo_section_open;
     bool    tone_section_open;
+    uint8_t selected_preset_idx;
     uint8_t selected_lfo_idx;
     bool    autogain_on;         // default on
     bool    yoink_on;            // default on
