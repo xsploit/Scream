@@ -123,6 +123,7 @@ typedef struct GUI
     LayoutMetrics layout;
     imgui_rect    lfo_toggle_button;
     imgui_rect    tone_toggle_button;
+    imgui_rect    color_toggle_button;
 
     float input_gain_peaks_slow[2];
     float input_gain_peaks_fast[2];

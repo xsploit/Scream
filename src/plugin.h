@@ -34,6 +34,10 @@ typedef enum ParamID
     PARAM_TONE_LOW,
     PARAM_TONE_MID,
     PARAM_TONE_HIGH,
+    PARAM_COLOR_MIX,
+    PARAM_COLOR_BODY,
+    PARAM_COLOR_RESONANCE,
+    PARAM_COLOR_MODE,
     // PARAM_RETRIG_LFO_1, // Deprecated. See state.c for details
     // PARAM_RETRIG_LFO_2,
     PARAM_COUNT,
@@ -59,6 +63,10 @@ static const char* PARAM_STR[] = {
     "PARAM_TONE_LOW",
     "PARAM_TONE_MID",
     "PARAM_TONE_HIGH",
+    "PARAM_COLOR_MIX",
+    "PARAM_COLOR_BODY",
+    "PARAM_COLOR_RESONANCE",
+    "PARAM_COLOR_MODE",
     // "PARAM_RETRIG_LFO_1",
     // "PARAM_RETRIG_LFO_2",
 };
@@ -190,6 +198,7 @@ typedef struct Plugin
     int     width, height; // retained gui size
     bool    lfo_section_open;
     bool    tone_section_open;
+    bool    color_section_open;
     uint8_t selected_preset_idx;
     uint8_t selected_lfo_idx;
     bool    autogain_on;         // default on
@@ -255,8 +264,12 @@ typedef struct Plugin
         float tone_low[2];
         float tone_mid[2];
         float tone_high[2];
+        float color_a[2];
+        float color_b[2];
+        float color_c[2];
 
         SmoothedValue tone_values[3];
+        SmoothedValue color_values[3];
 
     } state[2];
 

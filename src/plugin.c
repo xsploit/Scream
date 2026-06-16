@@ -111,6 +111,7 @@ void* cplug_createPlugin(CplugHostContext* ctx)
 
     p->lfo_section_open           = true;
     p->tone_section_open          = false;
+    p->color_section_open         = false;
     p->selected_preset_idx        = 0;
     p->autogain_on                = true;
     p->yoink_on                   = true;
@@ -239,6 +240,9 @@ void cplug_setSampleRateAndBlockSize(void* _p, double sampleRate, uint32_t maxBl
 
         for (int i = 0; i < ARRLEN(s->tone_values); i++)
             smoothvalue_reset(&s->tone_values[i], p->audio_params[PARAM_TONE_LOW + i]);
+
+        for (int i = 0; i < ARRLEN(s->color_values); i++)
+            smoothvalue_reset(&s->color_values[i], p->audio_params[PARAM_COLOR_MIX + i]);
     }
 
     smoothvalue_reset(&p->output_gain, p->main_params[PARAM_OUTPUT_GAIN]);
@@ -405,6 +409,24 @@ enum
     TONE_COUNT,
 };
 
+enum
+{
+    COLOR_MIX_IDX,
+    COLOR_BODY_IDX,
+    COLOR_RESONANCE_IDX,
+    COLOR_COUNT,
+};
+
+typedef enum ColorMode
+{
+    COLOR_MODE_WARM,
+    COLOR_MODE_HOLLOW,
+    COLOR_MODE_BRIGHT,
+    COLOR_MODE_COMB,
+    COLOR_MODE_DIGITAL,
+    COLOR_MODE_COUNT,
+} ColorMode;
+
 static inline float tone_norm_to_dB(float value)
 {
     return xm_lerpf(xm_clampf(value, 0.0f, 1.0f), RANGE_TONE_GAIN_MIN, RANGE_TONE_GAIN_MAX);
@@ -413,6 +435,107 @@ static inline float tone_norm_to_dB(float value)
 static inline bool tone_param_is_active(float value)
 {
     return fabsf(value - 0.5f) > 1.0e-5f;
+}
+
+typedef struct ColorCoeffs
+{
+    BiquadCoeffs a;
+    BiquadCoeffs b;
+    BiquadCoeffs c;
+    float        drive;
+    float        gain;
+} ColorCoeffs;
+
+static inline ColorMode color_mode_from_param(float value)
+{
+    return (ColorMode)xm_clampi(xm_droundi(value), 0, COLOR_MODE_COUNT - 1);
+}
+
+static inline ColorCoeffs color_make_coeffs(ColorMode mode, float body, float resonance, double sample_rate)
+{
+    const float sr       = (float)(sample_rate > 0.0 ? sample_rate : 44100.0);
+    const float body_bip = xm_clampf((body - 0.5f) * 2.0f, -1.0f, 1.0f);
+    const float res_bip  = xm_clampf((resonance - 0.5f) * 2.0f, -1.0f, 1.0f);
+
+    ColorCoeffs c = {
+        .a     = biquad_make_identity(),
+        .b     = biquad_make_identity(),
+        .c     = biquad_make_identity(),
+        .drive = 1.0f,
+        .gain  = 1.0f,
+    };
+
+    switch (mode)
+    {
+    case COLOR_MODE_WARM:
+        c.a     = biquad_make_low_shelf(220.0f, 4.0f * body_bip, sr);
+        c.b     = biquad_make_peak(720.0f, 0.85f, 3.5f * res_bip, sr);
+        c.c     = biquad_make_high_shelf(6200.0f, -1.5f * xm_maxf(body_bip, 0.0f), sr);
+        c.drive = 1.0f + 0.35f * xm_maxf(body_bip, 0.0f) + 0.20f * fabsf(res_bip);
+        c.gain  = 1.0f / c.drive;
+        break;
+    case COLOR_MODE_HOLLOW:
+        c.a     = biquad_make_peak(360.0f, 0.80f, -6.0f * xm_maxf(body_bip, 0.0f), sr);
+        c.b     = biquad_make_peak(1300.0f, 1.15f, 5.0f * res_bip, sr);
+        c.c     = biquad_make_high_shelf(5200.0f, -2.0f * xm_maxf(-body_bip, 0.0f), sr);
+        c.drive = 1.0f + 0.20f * fabsf(res_bip);
+        c.gain  = 1.0f / c.drive;
+        break;
+    case COLOR_MODE_BRIGHT:
+        c.a     = biquad_make_high_shelf(4200.0f, 6.0f * body_bip, sr);
+        c.b     = biquad_make_peak(2200.0f, 0.90f, 4.5f * res_bip, sr);
+        c.c     = biquad_make_low_shelf(180.0f, -2.5f * xm_maxf(body_bip, 0.0f), sr);
+        c.drive = 1.0f + 0.25f * xm_maxf(body_bip, 0.0f) + 0.15f * fabsf(res_bip);
+        c.gain  = 1.0f / c.drive;
+        break;
+    case COLOR_MODE_COMB:
+        c.a     = biquad_make_peak(520.0f, 2.2f, 5.5f * body_bip, sr);
+        c.b     = biquad_make_peak(1550.0f, 2.8f, -5.0f * res_bip, sr);
+        c.c     = biquad_make_peak(3400.0f, 3.4f, 4.5f * res_bip, sr);
+        c.drive = 1.0f + 0.15f * fabsf(body_bip) + 0.15f * fabsf(res_bip);
+        c.gain  = 1.0f / c.drive;
+        break;
+    case COLOR_MODE_DIGITAL:
+    case COLOR_MODE_COUNT:
+        c.a     = biquad_make_peak(980.0f, 1.7f, 4.0f * body_bip, sr);
+        c.b     = biquad_make_high_shelf(7600.0f, 5.0f * res_bip, sr);
+        c.c     = biquad_make_low_shelf(120.0f, -2.0f * xm_maxf(body_bip, 0.0f), sr);
+        c.drive = 1.0f + 0.55f * fabsf(body_bip) + 0.45f * fabsf(res_bip);
+        c.gain  = 1.0f / c.drive;
+        break;
+    }
+
+    return c;
+}
+
+static inline float color_process_sample(float input, const ColorCoeffs* c, ColorMode mode, struct FilterState* s)
+{
+    float y = input;
+    y       = biquad_process(y, &c->a, s->color_a);
+    y       = biquad_process(y, &c->b, s->color_b);
+    y       = biquad_process(y, &c->c, s->color_c);
+
+    if (c->drive > 1.0001f)
+    {
+        if (mode == COLOR_MODE_DIGITAL)
+        {
+            const float driven = y * c->drive;
+            y                  = (driven - 0.18f * driven * driven * driven) * c->gain;
+        }
+        else
+        {
+            y = tanhf(y * c->drive) * c->gain;
+        }
+    }
+
+    if (y != y)
+    {
+        s->color_a[0] = s->color_a[1] = 0.0f;
+        s->color_b[0] = s->color_b[1] = 0.0f;
+        s->color_c[0] = s->color_c[1] = 0.0f;
+        return 0.0f;
+    }
+    return xm_clampf(y, -32.0f, 32.0f);
 }
 
 typedef struct YoinkOutput
@@ -641,6 +764,12 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
         for (int i = 0; i < ARRLEN(s.tone_values); i++)
             smoothvalue_set_target(&s.tone_values[i], p->audio_params[PARAM_TONE_LOW + i], param_smoothing_time);
 
+        _Static_assert(ARRLEN(s.color_values) == COLOR_COUNT, "");
+        _Static_assert(PARAM_COLOR_BODY == PARAM_COLOR_MIX + 1, "");
+        _Static_assert(PARAM_COLOR_RESONANCE == PARAM_COLOR_MIX + 2, "");
+        for (int i = 0; i < ARRLEN(s.color_values); i++)
+            smoothvalue_set_target(&s.color_values[i], p->audio_params[PARAM_COLOR_MIX + i], param_smoothing_time);
+
         float lp_cutoff = s.values[PARAM_CUTOFF].current;
         float hp_cutoff = s.values[PARAM_SCREAM].current;
         float resonance = s.values[PARAM_RESONANCE].current;
@@ -650,6 +779,10 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
         float tone_low  = s.tone_values[TONE_LOW_IDX].current;
         float tone_mid  = s.tone_values[TONE_MID_IDX].current;
         float tone_high = s.tone_values[TONE_HIGH_IDX].current;
+        float color_mix = s.color_values[COLOR_MIX_IDX].current;
+        float color_body = s.color_values[COLOR_BODY_IDX].current;
+        float color_resonance = s.color_values[COLOR_RESONANCE_IDX].current;
+        ColorMode color_mode = color_mode_from_param(p->audio_params[PARAM_COLOR_MODE]);
 
 // #define CUTOFF_MAX    MIDI_NOTE_NUM_20kHz
 #define CUTOFF_MAX (MIDI_NOTE_NUM_20kHz)
@@ -689,6 +822,7 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
         BiquadCoeffs tone_low_c  = biquad_make_low_shelf(160.0f, tone_norm_to_dB(tone_low), (float)p->sample_rate);
         BiquadCoeffs tone_mid_c  = biquad_make_peak(950.0f, 0.75f, tone_norm_to_dB(tone_mid), (float)p->sample_rate);
         BiquadCoeffs tone_high_c = biquad_make_high_shelf(5600.0f, tone_norm_to_dB(tone_high), (float)p->sample_rate);
+        ColorCoeffs color_c = color_make_coeffs(color_mode, color_body, color_resonance, p->sample_rate);
 
         const bool smooth_params = s.values[PARAM_CUTOFF].remaining > 0 | s.values[PARAM_SCREAM].remaining > 0 |
                                    s.values[PARAM_RESONANCE].remaining > 0 | s.values[PARAM_INPUT_GAIN].remaining > 0 |
@@ -698,6 +832,10 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
                                  s.tone_values[TONE_HIGH_IDX].remaining > 0;
         const bool tone_active = smooth_tone || tone_param_is_active(tone_low) || tone_param_is_active(tone_mid) ||
                                  tone_param_is_active(tone_high);
+        const bool smooth_color = s.color_values[COLOR_MIX_IDX].remaining > 0 ||
+                                  s.color_values[COLOR_BODY_IDX].remaining > 0 ||
+                                  s.color_values[COLOR_RESONANCE_IDX].remaining > 0;
+        const bool color_active = smooth_color || color_mix > 1.0e-5f;
 
         const bool has_modulation_or_smoothing = !!lfo_1_mod_flags || !!lfo_2_mod_flags || smooth_params;
 
@@ -797,6 +935,14 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
                 tone_high_c = biquad_make_high_shelf(5600.0f, tone_norm_to_dB(tone_high), (float)p->sample_rate);
             }
 
+            if (smooth_color)
+            {
+                color_mix       = smoothvalue_tick(&s.color_values[COLOR_MIX_IDX]);
+                color_body      = smoothvalue_tick(&s.color_values[COLOR_BODY_IDX]);
+                color_resonance = smoothvalue_tick(&s.color_values[COLOR_RESONANCE_IDX]);
+                color_c         = color_make_coeffs(color_mode, color_body, color_resonance, p->sample_rate);
+            }
+
             const float dry = audio[i];
             float       x   = dry;
             float       direct_sub = 0.0f;
@@ -838,6 +984,17 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
 
             // *it = xm_clampf(y, -1, 1);
             float mixed = direct_sub + wet * y + (1 - wet) * pre_scream;
+            if (color_active)
+            {
+                const float colored = color_process_sample(mixed, &color_c, color_mode, &s);
+                mixed               = mixed + xm_clampf(color_mix, 0.0f, 1.0f) * (colored - mixed);
+            }
+            else
+            {
+                s.color_a[0] = s.color_a[1] = 0.0f;
+                s.color_b[0] = s.color_b[1] = 0.0f;
+                s.color_c[0] = s.color_c[1] = 0.0f;
+            }
             if (tone_active)
             {
                 if (tone_param_is_active(tone_low) || s.tone_values[TONE_LOW_IDX].remaining > 0)
@@ -901,6 +1058,12 @@ void process_audio(Plugin* p, float** output, int start_sample, int num_frames)
         ROUND_STATE_TO_ZERO(s.tone_mid[1])
         ROUND_STATE_TO_ZERO(s.tone_high[0])
         ROUND_STATE_TO_ZERO(s.tone_high[1])
+        ROUND_STATE_TO_ZERO(s.color_a[0])
+        ROUND_STATE_TO_ZERO(s.color_a[1])
+        ROUND_STATE_TO_ZERO(s.color_b[0])
+        ROUND_STATE_TO_ZERO(s.color_b[1])
+        ROUND_STATE_TO_ZERO(s.color_c[0])
+        ROUND_STATE_TO_ZERO(s.color_c[1])
         ROUND_STATE_TO_ZERO(s.fb_yn_1)
 
         p->state[ch] = s;

@@ -290,6 +290,9 @@ bool param_string_to_value(uint32_t param_id, const char* str, double* val)
     case PARAM_YOINK:
     case PARAM_RESONANCE:
     case PARAM_WET:
+    case PARAM_COLOR_MIX:
+    case PARAM_COLOR_BODY:
+    case PARAM_COLOR_RESONANCE:
         if ((ok = sscanf(str, "%lf%%", val)))
             *val *= 0.01;
         break;
@@ -345,11 +348,26 @@ bool param_string_to_value(uint32_t param_id, const char* str, double* val)
 
         if (ok)
             *val = normalise_sec(sec);
+        break;
+    }
+    case PARAM_COLOR_MODE:
+    {
+        static const char* COLOR_MODE_NAMES[] = {"A Warm", "B Hollow", "C Bright", "D Comb", "E Digital"};
+        for (int i = 0; i < ARRLEN(COLOR_MODE_NAMES); i++)
+        {
+            if (0 == strcmpi(COLOR_MODE_NAMES[i], str))
+            {
+                *val = (double)i;
+                ok   = 1;
+                break;
+            }
+        }
+        break;
     }
     case PARAM_COUNT:
         break;
     }
-    if (ok)
+    if (ok && param_id != PARAM_COLOR_MODE)
         *val = xm_clampd(*val, 0, 1);
     return ok;
 }
@@ -370,6 +388,9 @@ int param_value_to_string(ParamID paramId, char* buf, size_t bufsize, double val
     case PARAM_YOINK:
     case PARAM_RESONANCE:
     case PARAM_WET:
+    case PARAM_COLOR_MIX:
+    case PARAM_COLOR_BODY:
+    case PARAM_COLOR_RESONANCE:
         n = xtr_fmt(buf, bufsize, 0, "%.2f%%", value * 100);
         break;
     case PARAM_INPUT_GAIN:
@@ -442,6 +463,14 @@ int param_value_to_string(ParamID paramId, char* buf, size_t bufsize, double val
         n = xtr_fmt(buf, bufsize, 0, fmtstr, sec);
         break;
     }
+    case PARAM_COLOR_MODE:
+    {
+        static const char* COLOR_MODE_NAMES[] = {"A Warm", "B Hollow", "C Bright", "D Comb", "E Digital"};
+        int idx = xm_droundi(value);
+        idx     = xm_clampi(idx, 0, ARRLEN(COLOR_MODE_NAMES) - 1);
+        n       = xtr_fmt(buf, bufsize, 0, "%s", COLOR_MODE_NAMES[idx]);
+        break;
+    }
     case PARAM_COUNT:
         break;
     }
@@ -481,6 +510,10 @@ void cplug_getParameterName(void* p, uint32_t paramId, char* buf, size_t buflen)
         "Tone Low",
         "Tone Mid",
         "Tone High",
+        "Color Mix",
+        "Color Body",
+        "Color Resonance",
+        "Color Mode",
     };
     // clang-format on
     _Static_assert(ARRLEN(NAMES) == PARAM_COUNT);
@@ -498,6 +531,8 @@ void cplug_getParameterRange(void* p, uint32_t paramId, double* min, double* max
     *max = 1;
     if (paramId == PARAM_SYNC_RATE_LFO_1 || paramId == PARAM_SYNC_RATE_LFO_2)
         *max = LFO_RATE_COUNT - 1;
+    if (paramId == PARAM_COLOR_MODE)
+        *max = 4;
 }
 
 double cplug_getDefaultParameterValue(void* _p, uint32_t paramId)
@@ -527,6 +562,16 @@ double cplug_getDefaultParameterValue(void* _p, uint32_t paramId)
     }
     case PARAM_WET:
         v = 1;
+        break;
+    case PARAM_COLOR_MIX:
+        v = 0;
+        break;
+    case PARAM_COLOR_BODY:
+    case PARAM_COLOR_RESONANCE:
+        v = 0.5;
+        break;
+    case PARAM_COLOR_MODE:
+        v = 0;
         break;
     case PARAM_YOINK:
         v = 44.0 / 127.0;
@@ -622,6 +667,8 @@ double cplug_denormaliseParameterValue(void* p, uint32_t paramId, double value)
 {
     if (paramId == PARAM_SYNC_RATE_LFO_1 || paramId == PARAM_SYNC_RATE_LFO_2)
         value *= LFO_RATE_COUNT - 1;
+    if (paramId == PARAM_COLOR_MODE)
+        value *= 4;
 
     return value;
 }
@@ -629,6 +676,8 @@ double cplug_normaliseParameterValue(void* p, uint32_t paramId, double value)
 {
     if (paramId == PARAM_SYNC_RATE_LFO_1 || paramId == PARAM_SYNC_RATE_LFO_2)
         value /= LFO_RATE_COUNT - 1;
+    if (paramId == PARAM_COLOR_MODE)
+        value /= 4;
 
     return value;
 }

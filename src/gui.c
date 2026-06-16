@@ -534,7 +534,7 @@ void pw_get_info(struct PWGetInfo* info)
         uint32_t min_height     = (uint32_t)(GUI_MIN_HEIGHT);
         uint32_t content_height = (uint32_t)(CONTENT_HEIGHT);
 
-        if (gui->plugin->lfo_section_open || gui->plugin->tone_section_open)
+        if (gui->plugin->lfo_section_open || gui->plugin->tone_section_open || gui->plugin->color_section_open)
         {
             min_height += content_height;
         }
@@ -744,26 +744,38 @@ bool pw_event(const PWEvent* event)
     if (event->type == PW_EVENT_MOUSE_LEFT_DOWN)
     {
         imgui_pt mouse = {event->mouse.x, event->mouse.y};
-        bool     hit_lfo  = imgui_hittest_rect(mouse, &gui->lfo_toggle_button);
-        bool     hit_tone = imgui_hittest_rect(mouse, &gui->tone_toggle_button);
-        if (hit_lfo || hit_tone)
+        bool     hit_lfo   = imgui_hittest_rect(mouse, &gui->lfo_toggle_button);
+        bool     hit_tone  = imgui_hittest_rect(mouse, &gui->tone_toggle_button);
+        bool     hit_color = imgui_hittest_rect(mouse, &gui->color_toggle_button);
+        if (hit_lfo || hit_tone || hit_color)
         {
             LayoutMetrics* lm = &gui->layout;
 
-            const bool was_open = gui->plugin->lfo_section_open || gui->plugin->tone_section_open;
+            const bool was_open =
+                gui->plugin->lfo_section_open || gui->plugin->tone_section_open || gui->plugin->color_section_open;
             if (hit_lfo)
             {
-                bool next = !gui->plugin->lfo_section_open;
-                gui->plugin->lfo_section_open  = next;
-                gui->plugin->tone_section_open = false;
+                bool next                       = !gui->plugin->lfo_section_open;
+                gui->plugin->lfo_section_open   = next;
+                gui->plugin->tone_section_open  = false;
+                gui->plugin->color_section_open = false;
+            }
+            else if (hit_tone)
+            {
+                bool next                       = !gui->plugin->tone_section_open;
+                gui->plugin->tone_section_open  = next;
+                gui->plugin->lfo_section_open   = false;
+                gui->plugin->color_section_open = false;
             }
             else
             {
-                bool next = !gui->plugin->tone_section_open;
-                gui->plugin->tone_section_open = next;
-                gui->plugin->lfo_section_open  = false;
+                bool next                       = !gui->plugin->color_section_open;
+                gui->plugin->color_section_open = next;
+                gui->plugin->lfo_section_open   = false;
+                gui->plugin->tone_section_open  = false;
             }
-            const bool is_open = gui->plugin->lfo_section_open || gui->plugin->tone_section_open;
+            const bool is_open =
+                gui->plugin->lfo_section_open || gui->plugin->tone_section_open || gui->plugin->color_section_open;
 
             int next_height    = lm->height;
             int content_height = lm->content_b - lm->content_y;
@@ -1105,7 +1117,9 @@ bool do_bg_command_lists_match(GUI* gui)
 #define PRESET_OUTPUT_DB(db) PRESET_NORM_DB((db), RANGE_OUTPUT_GAIN_MIN, RANGE_OUTPUT_GAIN_MAX)
 #define PRESET_TONE_DB(db) PRESET_NORM_DB((db), RANGE_TONE_GAIN_MIN, RANGE_TONE_GAIN_MAX)
 #define PRESET_YOINK_CC(cc) ((cc) / 127.0)
-#define PRESET_PARAMS(cutoff, scream, resonance, input_db, wet, yoink, output_db, lfo1_rate, lfo2_rate, low_db, mid_db, high_db) \
+#define PRESET_PARAMS(                                                                                                         \
+    cutoff, scream, resonance, input_db, wet, yoink, output_db, lfo1_rate, lfo2_rate, low_db, mid_db, high_db, color_mix,      \
+    color_body, color_resonance, color_mode)                                                                                   \
     {                                                                                                                         \
         (cutoff),                                                                                                             \
         (scream),                                                                                                             \
@@ -1125,6 +1139,10 @@ bool do_bg_command_lists_match(GUI* gui)
         PRESET_TONE_DB(low_db),                                                                                               \
         PRESET_TONE_DB(mid_db),                                                                                               \
         PRESET_TONE_DB(high_db),                                                                                              \
+        (color_mix),                                                                                                          \
+        (color_body),                                                                                                         \
+        (color_resonance),                                                                                                    \
+        (double)(color_mode),                                                                                                 \
     }
 
 typedef struct FactoryPreset
@@ -1143,7 +1161,7 @@ typedef struct FactoryPreset
 static const FactoryPreset FACTORY_PRESETS[] = {
     {
         .name                 = "INIT RACK",
-        .params               = PRESET_PARAMS(0.85, 0.465, 1.0, 0.0, 1.0, PRESET_YOINK_CC(44.0), -6.0, LFO_RATE_1_4, LFO_RATE_1_4, 0.0, 0.0, 0.0),
+        .params               = PRESET_PARAMS(0.85, 0.465, 1.0, 0.0, 1.0, PRESET_YOINK_CC(44.0), -6.0, LFO_RATE_1_4, LFO_RATE_1_4, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0),
         .lfo_loop_type        = {LFO_RETRIG, LFO_RETRIG},
         .autogain_on          = true,
         .yoink_on             = true,
@@ -1153,7 +1171,7 @@ static const FactoryPreset FACTORY_PRESETS[] = {
     },
     {
         .name                 = "SUB CLEAN",
-        .params               = PRESET_PARAMS(0.86, 0.40, 0.90, -1.0, 0.88, PRESET_YOINK_CC(38.0), -6.0, LFO_RATE_1_4, LFO_RATE_1_8, 2.0, -1.0, -1.5),
+        .params               = PRESET_PARAMS(0.86, 0.40, 0.90, -1.0, 0.88, PRESET_YOINK_CC(38.0), -6.0, LFO_RATE_1_4, LFO_RATE_1_8, 2.0, -1.0, -1.5, 0.0, 0.5, 0.5, 0),
         .lfo_loop_type        = {LFO_RETRIG, LFO_RETRIG},
         .autogain_on          = true,
         .yoink_on             = true,
@@ -1163,7 +1181,7 @@ static const FactoryPreset FACTORY_PRESETS[] = {
     },
     {
         .name                 = "SUB FOLLOW",
-        .params               = PRESET_PARAMS(0.84, 0.48, 1.0, 0.0, 1.0, PRESET_YOINK_CC(52.0), -7.0, LFO_RATE_1_4, LFO_RATE_1_8, 1.0, 1.0, 0.0),
+        .params               = PRESET_PARAMS(0.84, 0.48, 1.0, 0.0, 1.0, PRESET_YOINK_CC(52.0), -7.0, LFO_RATE_1_4, LFO_RATE_1_8, 1.0, 1.0, 0.0, 0.20, 0.55, 0.55, 0),
         .lfo_mod_amounts      = {[PARAM_YOINK] = {.left = 0.12f}},
         .lfo_loop_type        = {LFO_LOOP, LFO_RETRIG},
         .autogain_on          = true,
@@ -1174,7 +1192,7 @@ static const FactoryPreset FACTORY_PRESETS[] = {
     },
     {
         .name                 = "1/4 MOTION",
-        .params               = PRESET_PARAMS(0.82, 0.50, 0.95, -1.5, 0.96, PRESET_YOINK_CC(44.0), -8.0, LFO_RATE_1_4, LFO_RATE_1_8, 0.0, 1.5, 1.0),
+        .params               = PRESET_PARAMS(0.82, 0.50, 0.95, -1.5, 0.96, PRESET_YOINK_CC(44.0), -8.0, LFO_RATE_1_4, LFO_RATE_1_8, 0.0, 1.5, 1.0, 0.25, 0.55, 0.65, 3),
         .lfo_mod_amounts      = {[PARAM_CUTOFF] = {.left = 0.08f}, [PARAM_YOINK] = {.left = 0.22f}},
         .lfo_loop_type        = {LFO_LOOP, LFO_RETRIG},
         .autogain_on          = true,
@@ -1185,7 +1203,7 @@ static const FactoryPreset FACTORY_PRESETS[] = {
     },
     {
         .name                 = "1/8 RIP",
-        .params               = PRESET_PARAMS(0.90, 0.58, 1.0, -3.0, 1.0, PRESET_YOINK_CC(61.0), -9.0, LFO_RATE_1_8, LFO_RATE_1_16, -1.5, 2.0, 3.5),
+        .params               = PRESET_PARAMS(0.90, 0.58, 1.0, -3.0, 1.0, PRESET_YOINK_CC(61.0), -9.0, LFO_RATE_1_8, LFO_RATE_1_16, -1.5, 2.0, 3.5, 0.35, 0.60, 0.70, 4),
         .lfo_mod_amounts      = {[PARAM_SCREAM] = {.left = -0.10f}, [PARAM_YOINK] = {.left = 0.30f}},
         .lfo_loop_type        = {LFO_LOOP, LFO_RETRIG},
         .autogain_on          = true,
@@ -1196,7 +1214,7 @@ static const FactoryPreset FACTORY_PRESETS[] = {
     },
     {
         .name                 = "DARK BODY",
-        .params               = PRESET_PARAMS(0.72, 0.38, 0.88, 0.0, 0.94, PRESET_YOINK_CC(42.0), -6.5, LFO_RATE_1_4, LFO_RATE_1_8, 5.0, -2.0, -6.0),
+        .params               = PRESET_PARAMS(0.72, 0.38, 0.88, 0.0, 0.94, PRESET_YOINK_CC(42.0), -6.5, LFO_RATE_1_4, LFO_RATE_1_8, 5.0, -2.0, -6.0, 0.45, 0.75, 0.45, 0),
         .lfo_loop_type        = {LFO_RETRIG, LFO_RETRIG},
         .autogain_on          = true,
         .yoink_on             = true,
@@ -1206,7 +1224,7 @@ static const FactoryPreset FACTORY_PRESETS[] = {
     },
     {
         .name                 = "BRIGHT TEAR",
-        .params               = PRESET_PARAMS(0.95, 0.58, 0.92, -2.0, 1.0, PRESET_YOINK_CC(49.0), -8.0, LFO_RATE_1_4, LFO_RATE_1_12, -2.0, 1.5, 5.0),
+        .params               = PRESET_PARAMS(0.95, 0.58, 0.92, -2.0, 1.0, PRESET_YOINK_CC(49.0), -8.0, LFO_RATE_1_4, LFO_RATE_1_12, -2.0, 1.5, 5.0, 0.35, 0.65, 0.65, 2),
         .lfo_mod_amounts      = {[PARAM_YOINK] = {.right = 0.10f}},
         .lfo_loop_type        = {LFO_RETRIG, LFO_LOOP},
         .autogain_on          = true,
@@ -1217,7 +1235,7 @@ static const FactoryPreset FACTORY_PRESETS[] = {
     },
     {
         .name                 = "MID BITE",
-        .params               = PRESET_PARAMS(0.88, 0.52, 0.92, -1.0, 0.90, PRESET_YOINK_CC(47.0), -7.0, LFO_RATE_1_4, LFO_RATE_1_8, -1.0, 6.0, 0.5),
+        .params               = PRESET_PARAMS(0.88, 0.52, 0.92, -1.0, 0.90, PRESET_YOINK_CC(47.0), -7.0, LFO_RATE_1_4, LFO_RATE_1_8, -1.0, 6.0, 0.5, 0.30, 0.55, 0.70, 1),
         .lfo_loop_type        = {LFO_RETRIG, LFO_RETRIG},
         .autogain_on          = true,
         .yoink_on             = true,
@@ -1227,7 +1245,7 @@ static const FactoryPreset FACTORY_PRESETS[] = {
     },
     {
         .name                 = "WET COMB",
-        .params               = PRESET_PARAMS(0.83, 0.50, 1.0, -2.0, 1.0, PRESET_YOINK_CC(72.0), -9.0, LFO_RATE_1_6, LFO_RATE_1_8, 0.0, -0.5, 2.0),
+        .params               = PRESET_PARAMS(0.83, 0.50, 1.0, -2.0, 1.0, PRESET_YOINK_CC(72.0), -9.0, LFO_RATE_1_6, LFO_RATE_1_8, 0.0, -0.5, 2.0, 0.40, 0.65, 0.70, 3),
         .lfo_mod_amounts      = {[PARAM_YOINK] = {.left = 0.08f}},
         .lfo_loop_type        = {LFO_LOOP, LFO_RETRIG},
         .autogain_on          = true,
@@ -1238,7 +1256,7 @@ static const FactoryPreset FACTORY_PRESETS[] = {
     },
     {
         .name                 = "SCREAM ONLY",
-        .params               = PRESET_PARAMS(0.82, 0.55, 0.85, -1.0, 1.0, PRESET_YOINK_CC(44.0), -7.0, LFO_RATE_1_4, LFO_RATE_1_8, 0.0, 0.0, 0.0),
+        .params               = PRESET_PARAMS(0.82, 0.55, 0.85, -1.0, 1.0, PRESET_YOINK_CC(44.0), -7.0, LFO_RATE_1_4, LFO_RATE_1_8, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0),
         .lfo_loop_type        = {LFO_RETRIG, LFO_RETRIG},
         .autogain_on          = true,
         .yoink_on             = false,
@@ -1248,7 +1266,7 @@ static const FactoryPreset FACTORY_PRESETS[] = {
     },
 };
 
-_Static_assert(PARAM_COUNT == 18, "Preset params assume current parameter layout");
+_Static_assert(PARAM_COUNT == 22, "Preset params assume current parameter layout");
 _Static_assert(NUM_AUTOMATABLE_PARAMS == 6, "Preset LFO amounts assume current modulation layout");
 _Static_assert(ARRLEN(FACTORY_PRESETS) >= 10, "Need at least ten factory presets");
 
@@ -1496,6 +1514,104 @@ void draw_tone_section(GUI* gui)
     }
 }
 
+void draw_color_section(GUI* gui)
+{
+    Plugin*         p   = gui->plugin;
+    XVGCommandList* bg  = gui->xvg_bg;
+    XVGCommandList* xvg = gui->xvg_anim;
+    LayoutMetrics*  lm  = &gui->layout;
+    imgui_context*   im  = &gui->imgui;
+
+    const float scale = lm->param_scale;
+    imgui_rect  area;
+    area.x = lm->content_x + 64 * scale;
+    area.r = lm->content_r - 64 * scale;
+    area.y = lm->top_content_bottom + 26 * scale;
+    area.b = lm->content_b - 24 * scale;
+
+    const float title_size = 14 * scale;
+    xvg_draw_text(bg, area.x, area.y, "COLOR", NULL, title_size, XVG_ALIGN_CL, C_TEXT_LIGHT_BG);
+
+    const ParamID ids[]   = {PARAM_COLOR_MIX, PARAM_COLOR_BODY, PARAM_COLOR_RESONANCE};
+    const char*   names[] = {"MIX", "BODY", "RES"};
+    _Static_assert(ARRLEN(ids) == 3, "");
+    _Static_assert(ARRLEN(names) == ARRLEN(ids), "");
+
+    const float slider_top = area.y + 36 * scale;
+    const float slider_h   = xm_maxf(84 * scale, area.b - slider_top - 58 * scale);
+    const float slider_bot = slider_top + slider_h;
+    const float slot_w     = xm_minf(128 * scale, (area.r - area.x) / 3.0f);
+    const float total_w    = slot_w * 3.0f;
+    const float start_x    = (area.x + area.r - total_w) * 0.5f;
+    const float rail_w     = 18 * scale;
+    const float handle_w   = 54 * scale;
+    const float handle_h   = 14 * scale;
+
+    extern int param_value_to_string(ParamID paramId, char* buf, size_t bufsize, double value);
+
+    for (int i = 0; i < ARRLEN(ids); i++)
+    {
+        const float cx = start_x + slot_w * ((float)i + 0.5f);
+
+        imgui_rect hit;
+        hit.x = cx - handle_w * 0.7f;
+        hit.r = cx + handle_w * 0.7f;
+        hit.y = slider_top - 8 * scale;
+        hit.b = slider_bot + 8 * scale;
+
+        unsigned events  = imgui_get_events_rect(im, 'col0' + i, &hit);
+        double   value   = handle_param_events(gui, ids[i], events, slider_h);
+        float    value_y = xm_lerpf((float)value, slider_bot, slider_top);
+
+        xvg_draw_text(bg, cx, area.y + 8 * scale, names[i], NULL, 12 * scale, XVG_ALIGN_CC, C_TEXT_LIGHT_BG);
+
+        float rail_x = cx - rail_w * 0.5f;
+        xvg_draw_rectangle(bg, rail_x, slider_top, rail_w, slider_h, 6 * scale, 0, C_BG_DARK);
+        for (int tick = 0; tick <= 4; tick++)
+        {
+            float t      = (float)tick / 4.0f;
+            float tick_y = floorf(xm_lerpf(t, slider_bot, slider_top)) + 0.5f;
+            float tick_w = tick == 2 ? 18 * scale : 10 * scale;
+            xvg_draw_solid_rectangle(bg, cx - tick_w * 0.5f, tick_y, tick_w, 1, C_GREY_2);
+        }
+
+        xvg_draw_rectangle(xvg, rail_x + 3 * scale, value_y, rail_w - 6 * scale, slider_bot - value_y, 4 * scale, 0, C_LIGHT_BLUE_2);
+        xvg_draw_rectangle(xvg, cx - handle_w * 0.5f, value_y - handle_h * 0.5f, handle_w, handle_h, 4 * scale, 0, C_BG_LIGHT);
+        xvg_draw_rectangle(xvg, cx - handle_w * 0.5f, value_y - handle_h * 0.5f, handle_w, handle_h, 4 * scale, 1 * scale, C_GREY_2);
+
+        char label[24];
+        int  label_len = param_value_to_string(ids[i], label, sizeof(label), value);
+        xvg_draw_text(xvg, cx, slider_bot + 20 * scale, label, label + label_len, 10 * scale, XVG_ALIGN_CC, C_TEXT_LIGHT_BG);
+    }
+
+    const char* mode_names[] = {"A", "B", "C", "D", "E"};
+    _Static_assert(ARRLEN(mode_names) == 5, "");
+
+    const float mode_w     = 46 * scale;
+    const float mode_gap   = 8 * scale;
+    const float mode_total = mode_w * ARRLEN(mode_names) + mode_gap * (ARRLEN(mode_names) - 1);
+    const float mode_y     = area.b - 24 * scale;
+    const float mode_h     = 20 * scale;
+    const float mode_x0    = (area.x + area.r - mode_total) * 0.5f;
+    const int   active     = xm_clampi(xm_droundi(main_get_param(p, PARAM_COLOR_MODE)), 0, ARRLEN(mode_names) - 1);
+
+    xvg_draw_text(bg, mode_x0 - 10 * scale, mode_y + mode_h * 0.5f, "MODE", NULL, 10 * scale, XVG_ALIGN_CR, C_TEXT_LIGHT_BG);
+    for (int i = 0; i < ARRLEN(mode_names); i++)
+    {
+        imgui_rect rect = {mode_x0 + i * (mode_w + mode_gap), mode_y, mode_x0 + i * (mode_w + mode_gap) + mode_w, mode_y + mode_h};
+        unsigned   events = imgui_get_events_rect(im, 'cm0' + i, &rect);
+        if (events & IMGUI_EVENT_MOUSE_ENTER)
+            pw_set_mouse_cursor(gui->pw, PW_CURSOR_HAND_POINT);
+        if (events & IMGUI_EVENT_MOUSE_LEFT_DOWN)
+            param_set(p, PARAM_COLOR_MODE, (double)i);
+
+        const bool selected = i == active;
+        xvg_draw_rectangle(bg, rect.x, rect.y, rect.r - rect.x, rect.b - rect.y, 4 * scale, 0, selected ? C_LIGHT_BLUE_2 : C_BG_DARK);
+        xvg_draw_rectangle(bg, rect.x, rect.y, rect.r - rect.x, rect.b - rect.y, 4 * scale, 1 * scale, selected ? C_LIGHT_BLUE : C_GRID_SECONDARY);
+        xvg_draw_text(xvg, rect_cx(&rect), rect_cy(&rect), mode_names[i], NULL, 11 * scale, XVG_ALIGN_CC, selected ? C_BG_DARK : C_TEXT_LIGHT_BG);
+    }
+}
+
 void pw_tick(void* _gui)
 {
     GUI*    gui = _gui;
@@ -1574,7 +1690,7 @@ void pw_tick(void* _gui)
 
         int        init_height = GUI_INIT_HEIGHT;
         int        top_height  = lm->height;
-        const bool drawer_open = p->lfo_section_open || p->tone_section_open;
+        const bool drawer_open = p->lfo_section_open || p->tone_section_open || p->color_section_open;
         if (drawer_open)
         {
             init_height = HEIGHT_HEADER + HEIGHT_FOOTER + 2 * CONTENT_HEIGHT + 2 * BORDER_PADDING;
@@ -1690,8 +1806,8 @@ void pw_tick(void* _gui)
         lm->current_lfo_playhead = lm->last_lfo_playhead = playhead;
 
         float      lfo_btn_width = 78 * lm->param_scale;
-        float      lfo_btn_gap   = 12 * lm->param_scale;
-        float      lfo_btn_total = lfo_btn_width * 2 + lfo_btn_gap;
+        float      lfo_btn_gap   = 10 * lm->param_scale;
+        float      lfo_btn_total = lfo_btn_width * 3 + lfo_btn_gap * 2;
         imgui_rect lfo_btn;
         lfo_btn.x              = (lm->width / 2) - lfo_btn_total * 0.5f;
         lfo_btn.y              = lm->top_content_bottom - 20 * lm->param_scale;
@@ -1699,10 +1815,15 @@ void pw_tick(void* _gui)
         lfo_btn.b              = lm->top_content_bottom;
         gui->lfo_toggle_button = lfo_btn;
 
-        imgui_rect tone_btn      = lfo_btn;
-        tone_btn.x               = lfo_btn.r + lfo_btn_gap;
-        tone_btn.r               = tone_btn.x + lfo_btn_width;
-        gui->tone_toggle_button  = tone_btn;
+        imgui_rect tone_btn     = lfo_btn;
+        tone_btn.x              = lfo_btn.r + lfo_btn_gap;
+        tone_btn.r              = tone_btn.x + lfo_btn_width;
+        gui->tone_toggle_button = tone_btn;
+
+        imgui_rect color_btn      = tone_btn;
+        color_btn.x               = tone_btn.r + lfo_btn_gap;
+        color_btn.r               = color_btn.x + lfo_btn_width;
+        gui->color_toggle_button  = color_btn;
 
         // Framebuffer
         int fb_width  = lm->width * gui->xvg.backingScaleFactor;
@@ -2664,7 +2785,7 @@ void pw_tick(void* _gui)
 
     // Drawer toggle buttons
     {
-        if (p->lfo_section_open || p->tone_section_open)
+        if (p->lfo_section_open || p->tone_section_open || p->color_section_open)
         {
             imgui_rect rect = gui->lfo_toggle_button;
             float       y = rect.b - 4;
@@ -2675,6 +2796,7 @@ void pw_tick(void* _gui)
 
         draw_drawer_toggle(gui, gui->lfo_toggle_button, "LFO", p->lfo_section_open, 'lopn');
         draw_drawer_toggle(gui, gui->tone_toggle_button, "TONE", p->tone_section_open, 'topn');
+        draw_drawer_toggle(gui, gui->color_toggle_button, "COLOR", p->color_section_open, 'copn');
     }
 
     if (p->lfo_section_open)
@@ -2703,6 +2825,10 @@ void pw_tick(void* _gui)
     else if (p->tone_section_open)
     {
         draw_tone_section(gui);
+    }
+    else if (p->color_section_open)
+    {
+        draw_color_section(gui);
     }
 
     // Footer bottom left
