@@ -127,7 +127,7 @@ void* cplug_createPlugin(CplugHostContext* ctx)
 
     p->main_params[PARAM_CUTOFF]    = 0.85;
     p->main_params[PARAM_SCREAM]    = 0.465f;
-    p->main_params[PARAM_RESONANCE] = 1;
+    p->main_params[PARAM_RESONANCE] = 0.35;
 
     memcpy(p->audio_params, p->main_params, sizeof(p->main_params));
     _Static_assert(sizeof(p->main_params) == sizeof(p->audio_params));
@@ -159,7 +159,7 @@ void* cplug_createPlugin(CplugHostContext* ctx)
 
     p->bpm = 120;
 
-    p->lfo_mod_amounts[PARAM_CUTOFF].left = 0.25f;
+    p->lfo_mod_amounts[PARAM_CUTOFF].left = 0.0f;
 
 #ifdef CPLUG_BUILD_STANDALONE
     synth_init(&g_synth, p->audio_arena);

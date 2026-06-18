@@ -549,7 +549,7 @@ double cplug_getDefaultParameterValue(void* _p, uint32_t paramId)
         v = 0.5;
         break;
     case PARAM_RESONANCE:
-        v = 0.5;
+        v = 0.35;
         break;
     case PARAM_INPUT_GAIN:
         v = xm_normd(0, RANGE_INPUT_GAIN_MIN, RANGE_INPUT_GAIN_MAX);
@@ -584,11 +584,11 @@ double cplug_getDefaultParameterValue(void* _p, uint32_t paramId)
         break;
     case PARAM_SYNC_RATE_LFO_1:
     case PARAM_SYNC_RATE_LFO_2:
-        v = LFO_RATE_1_4;
+        v = LFO_RATE_1_BAR;
         break;
     case PARAM_SEC_RATE_LFO_1:
     case PARAM_SEC_RATE_LFO_2:
-        v = normalise_sec(0.25); // 250ms
+        v = normalise_sec(1.0);
         break;
     case PARAM_TONE_LOW:
     case PARAM_TONE_MID:
